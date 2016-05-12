@@ -1,4 +1,4 @@
-# OCL2UML-v0.1
+# OCL2fUML
 **Configuration for testing the OCL2UML project :**
 >**[ATL Configuration]**
 
