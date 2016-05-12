@@ -1,0 +1,2797 @@
+-- @atlcompiler atl2010
+-- @nsURI UML=http://www.eclipse.org/uml2/4.0.0/UML
+-- @nsURI ATL=http://www.eclipse.org/gmt/2005/OCL
+-- @nsURI ALF=http://www.eclipse.org/gmt/4.0.0/UML
+
+
+module AugmentUMLModelWithATLHelpers;
+create OUT: UML refining IN: UML, helpers: ATL, lib: FUML, lib_ALF: FUML, UMLPrimitiveTypes : UML;
+
+-- FUML = UML but with different names to fool ATL, otherwise refining lib into OUT
+		-- messes everything up
+
+
+helper context ATL!OclFeature def: typeName: String =
+	self.definition.context_.context_.name;
+
+helper context ATL!OclFeature def: class: UML!Class =
+	self.typeName.class;
+
+helper context String def: class: UML!Class =
+	UML!Class.allInstancesFrom('IN') -> any(e | e.name = self);
+
+------------------------------------------------------------------------------
+--getAncestor() in ATL2fUML = feature (in this code)
+--this helper used to identify the owner expansion region
+------------------------------------------------------------------------------
+helper context OclAny def: feature: ATL!OclFeature =
+	if self.refImmediateComposite().oclIsKindOf(ATL!OclFeature) then
+		self.refImmediateComposite()
+	else
+		self.refImmediateComposite().feature
+	endif;
+
+helper context OclAny def: toActivity : OclAny =
+	let container : OclAny = self.refImmediateComposite() in
+	if container.oclIsKindOf(ATL!OclFeature) then
+		container
+	else if container.oclIsKindOf(ATL!IterateExp) then
+		if container.body = self then
+			container
+		else
+			container.toActivity
+		endif
+	else
+		container.toActivity
+	endif endif;
+
+helper context OclAny def: inStructuredNode: TupleType(target:OclAny,resolveTo:String) =
+	let container : OclAny = self.refImmediateComposite() in
+	if container.oclIsKindOf(ATL!IteratorExp) then
+		if self = container.source then
+			container.inStructuredNode
+		else
+			Tuple {target = container, resolveTo = 't1'}
+		endif
+	else if container.oclIsKindOf(ATL!IfExp) then
+		if self = container.condition then
+			container.inStructuredNode
+		else
+			Tuple {
+				target = container,
+				resolveTo = if self = container.thenExpression then
+								'thenSAN'
+							else
+								'elseSAN'
+							endif
+				}
+		endif
+	else
+		if container.oclIsKindOf(ATL!Operation) then
+			Tuple {target = OclUndefined, resolveTo = 'notApplicable'}
+		else
+			container.inStructuredNode
+		endif
+	endif endif;
+
+abstract rule VariableDeclaration2ForkNode {
+	from
+		s: ATL!VariableDeclaration
+	to
+		_: ATL!VariableDeclaration,
+		result : UML!ForkNode (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			name <- s.varName
+		)
+}
+
+rule LetVariableDeclaration extends VariableDeclaration2ForkNode {
+	from
+		s: ATL!VariableDeclaration (
+			not s.letExp.oclIsUndefined()
+		)
+	to
+		_: ATL!VariableDeclaration,
+		of : UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- thisModule.resolveTemp(s.initExpression.toResult, 'result'),
+			target <- result
+		)
+}
+
+rule ActivityParameter extends VariableDeclaration2ForkNode {
+	from
+		s: ATL!Parameter
+	to
+		_: ATL!Parameter,
+		actP: UML!Parameter (
+			name <- s.varName,
+			lower <- s.type.lower,
+			upper <- s.type.upper
+		),
+		actPN: UML!ActivityParameterNode (
+			name <- s.varName,
+			parameter <- actP
+		),
+		of : UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- actPN,
+			target <- result
+		)
+}
+
+rule OperationParameter extends ActivityParameter {
+	from
+		s: ATL!Parameter (
+			s.operation.stereotype <> 'body'
+		)
+	to
+		_: ATL!Parameter,
+		opP: UML!Parameter (
+			name <- s.varName,
+			lower <- s.type.lower,
+			upper <- s.type.upper
+		)
+}
+
+helper context ATL!OclExpression def: toResult : ATL!OclExpression =
+	if self.oclIsKindOf(ATL!VariableExp) then
+		if self.referredVariable.varName = 'self' then
+			self
+		else
+			self.referredVariable
+		endif
+	else if self.oclIsKindOf(ATL!LetExp) then
+		self.in_.toResult
+	else
+		self
+	endif endif;
+
+rule Operation2Activity {
+	from
+		s: ATL!Operation
+	to
+		_: ATL!Operation,
+		opRet: UML!Parameter (
+			name <- 'result',
+			direction <- #return,
+			lower <- s.returnType.lower,
+			upper <- s.returnType.upper
+		),
+		activity : UML!Activity -> (s.class.ownedBehavior) (
+			name <- s.name,
+			ownedParameter <- s.parameters -> collect(p | thisModule.resolveTemp(p,
+					'actP')) -> append(actRet),
+			ownedNode <- s.parameters -> collect(p | thisModule.resolveTemp(p, 'actPN'))
+					-> append(result),
+			edge <- OrderedSet{t2}
+		),
+		actRet: UML!Parameter (
+			name <- 'result',
+			direction <- #return,
+			lower <- s.returnType.lower,
+			upper <- s.returnType.upper
+		),
+		result: UML!ActivityParameterNode (
+			name <- 'result',
+			parameter <- actRet
+		),
+		t2: UML!ObjectFlow (
+			source <- thisModule.resolveTemp(s.body.toResult, 'result'),
+			target <- result
+		)
+} 
+
+rule Operation2Operation extends Operation2Activity {
+	from
+		s: ATL!Operation (
+			s.stereotype <> 'body' and s.stereotype <> 'pre' and s.stereotype <> 'post'
+			and s.stereotype <> 'inv'
+		)
+	to
+		_: ATL!Operation,
+		t1: UML!Operation (
+			name <- s.name,
+			method <- activity,
+			class <- s.class,
+			ownedParameter <-	s.parameters->collect(p |
+									thisModule.resolveTemp(p, 'opP')
+								)->append(opRet)
+		)
+}
+rule Operation2Operation_inv extends Operation2Activity {
+	from
+		s: ATL!Operation (
+			s.stereotype = 'inv'
+		) 
+	to
+		_: ATL!Operation,
+		t1: UML!Operation (
+			name <- s.name ,
+			method <- activity,
+			class <- s.class,
+			ownedParameter <-	s.parameters->collect(p |
+									thisModule.resolveTemp(p, 'opP')
+								)->append(opRet)
+		),
+		
+		readSelf : UML!ReadSelfAction(
+			activity <- thisModule.resolveTemp(UML!Class.allInstancesFrom('IN')->any(i | s.class.toString().endsWith(i.name)), 
+												'Allinv_Act' ),
+			result <- readSelf_result
+		),
+		readSelf_result : UML!OutputPin,
+		objFlowa: UML!ObjectFlow(
+			source <- readSelf_result,
+			target <- callOp_target,
+			activity <- thisModule.resolveTemp(UML!Class.allInstancesFrom('IN')->any(i | s.class.toString().endsWith(i.name)),
+												'Allinv_Act' )
+		),
+		callOpooo : UML!CallOperationAction(
+			name <- s.name + s.stereotype,	
+			activity <- thisModule.resolveTemp(UML!Class.allInstancesFrom('IN')->any(i | s.class.toString().endsWith(i.name)), 
+												'Allinv_Act' ),
+			operation <- thisModule.resolveTemp(s, 't1'),
+			result <- callOp_result,
+			target <- callOp_target
+		
+		),
+		callOp_result : UML!OutputPin,
+		callOp_target : UML!InputPin(
+			name <- 'target'
+		),
+		objFlow: UML!ObjectFlow(
+			source <- callOp_result,
+			target <- thisModule.resolveTemp(UML!Class.allInstancesFrom('IN')->any(i | s.class.toString().endsWith(i.name)), 'fNode' ),
+			activity <- thisModule.resolveTemp(UML!Class.allInstancesFrom('IN')->any(i | s.class.toString().endsWith(i.name)), 
+												'Allinv_Act' )
+		)
+}
+	
+rule Operation2Operation_pre_post extends Operation2Activity {
+	from
+		s: ATL!Operation (
+			(s.stereotype = 'pre') or (s.stereotype = 'post') 
+		) 
+	to
+		_: ATL!Operation,
+		t1: UML!Operation (
+			name <- s.name,
+			method <- activity,
+			class <- s.class,
+			ownedParameter <-	s.parameters->collect(p |
+									thisModule.resolveTemp(p, 'opP')
+								)->append(opRet)
+		),
+		readSelf : UML!ReadSelfAction(
+			activity <- thisModule.resolveTemp( 
+							UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)),	'wrapperAct'),		
+			inStructuredNode <- if (s.stereotype = 'pre')then
+									thisModule.resolveTemp( UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)), 'strucNodePre')			
+								else
+									if (s.stereotype = 'post')then
+										thisModule.resolveTemp( UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)), 'strucNodePost')	
+									else 
+										OclUndefined
+									endif
+								endif,
+			result <- readSelf_result
+		),
+		readSelf_result : UML!OutputPin,
+		
+		obj_readself2callOp : UML!ObjectFlow(
+			activity <- thisModule.resolveTemp( 
+							UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)),	'wrapperAct'),		
+			inStructuredNode <- if (s.stereotype = 'pre')then
+									thisModule.resolveTemp( UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)), 'strucNodePre')			
+								else
+									if (s.stereotype = 'post')then
+										thisModule.resolveTemp( UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)), 'strucNodePost')	
+									else 
+										OclUndefined
+									endif
+								endif,
+			source <- readSelf_result,
+			target <- callOp_target
+		),
+		callOp : UML!CallOperationAction(
+			name <- s.name + s.stereotype,
+			activity <- thisModule.resolveTemp( 
+							UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)),	'wrapperAct'),		
+			inStructuredNode <- if (s.stereotype = 'pre')then
+									thisModule.resolveTemp( UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)), 'strucNodePre')			
+								else
+									if (s.stereotype = 'post')then
+										thisModule.resolveTemp( UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)), 'strucNodePost')	
+									else 
+										OclUndefined
+									endif
+								endif,
+			operation <- thisModule.resolveTemp( s, 't1'),
+			result <- callOp_result,
+			target <- callOp_target
+		),
+		
+		callOp_result : UML!OutputPin,
+		callOp_target : UML!InputPin(
+			name <- 'target'
+		),
+		objFlowToAssertEquals : UML!ObjectFlow(
+		source <- callOp_result,
+		target <- assrtEqls_t1a,
+		activity <- thisModule.resolveTemp( 
+							UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)),	'wrapperAct'),	
+		inStructuredNode <- if (s.stereotype = 'pre')then
+				thisModule.resolveTemp( UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)), 'strucNodePre')			
+			else
+				if (s.stereotype = 'post')then
+					thisModule.resolveTemp( UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)), 'strucNodePost')	
+				else 
+					OclUndefined
+				endif
+			endif
+			
+		),
+		cntlFlow1: UML!ControlFlow(
+			source <- callOp,
+			target <- assrtEqls, 
+			activity <- thisModule.resolveTemp( UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)),	'wrapperAct'),
+			inStructuredNode <- if (s.stereotype = 'pre')then
+										thisModule.resolveTemp( UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)),'strucNodePre')			
+								else
+										if (s.stereotype = 'post')then
+												thisModule.resolveTemp( UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)),'strucNodePost')	
+										else 
+											OclUndefined
+										endif
+								endif
+		),	
+		cntlFlow2: UML!ControlFlow(
+			source <- vsaOpName,
+			target <- assrtEqls, 
+			activity <- thisModule.resolveTemp( UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)),	'wrapperAct'),
+			inStructuredNode <- if (s.stereotype = 'pre')then
+										thisModule.resolveTemp( UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)),'strucNodePre')			
+								else
+										if (s.stereotype = 'post')then
+												thisModule.resolveTemp( UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)),'strucNodePost')	
+										else 
+											OclUndefined
+										endif
+								endif
+		),	
+		cntlFlow3: UML!ControlFlow(
+			source <- vsa1 ,
+			target <- assrtEqls, 
+			activity <- thisModule.resolveTemp( UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)),	'wrapperAct'),
+			inStructuredNode <- if (s.stereotype = 'pre')then
+										thisModule.resolveTemp( UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)),'strucNodePre')			
+								else
+										if (s.stereotype = 'post')then
+												thisModule.resolveTemp( UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)),'strucNodePost')	
+										else 
+											OclUndefined
+										endif
+								endif
+		),		
+		assrtEqls: UML!CallBehaviorAction (
+			name <- 'assertEquals',
+			behavior <- thisModule.resolveTemp(ATL!Unit.allInstancesFrom('helpers') -> first(), 'ae'),
+			result <- assrtEqls_result,
+			activity <- thisModule.resolveTemp( 
+							UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)),
+							'wrapperAct'),
+			inStructuredNode <- if (s.stereotype = 'pre')then
+										thisModule.resolveTemp( UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)),
+										'strucNodePre')			
+								else
+										if (s.stereotype = 'post')then
+												thisModule.resolveTemp( UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)),
+												'strucNodePost')	
+										else 
+											OclUndefined
+										endif
+								endif,
+			argument <- Sequence {assrtEqls_t1a, assrtEqls_t1b, assrtEqls_t1c}
+		),
+		assrtEqls_result: UML!OutputPin (
+			name <- 'result'
+		),
+		assrtEqls_t1a: UML!InputPin (
+			name <- 'first',
+			upper <- -1,
+			lower <- 0
+		),
+		assrtEqls_t1b: UML!InputPin (
+			name <- 'second',
+			upper <- -1,
+			lower <- 0
+		),
+		assrtEqls_t1c: UML!InputPin (
+			name <- 'third'
+		),
+		vsaOpName : UML!ValueSpecificationAction (
+			activity <- thisModule.resolveTemp(UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)),'wrapperAct'),
+			value <- vsaOpNamev,
+			result <- vsaOpNamer,
+			inStructuredNode <- if (s.stereotype = 'pre')then
+										thisModule.resolveTemp( UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)),
+										'strucNodePre')			
+								else
+										if (s.stereotype = 'post')then
+												thisModule.resolveTemp( UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)),
+												'strucNodePost')	
+										else 
+											OclUndefined
+										endif
+								endif
+		),
+		vsaOpNamev : UML!LiteralString (
+				value <- s.name
+		),
+		vsaOpNamer : UML!OutputPin
+	    ,
+		objFlow_nameOp_assertEquals : UML!ObjectFlow(
+			source <-  vsaOpNamer,
+			target <-  assrtEqls_t1c, 
+			activity <- thisModule.resolveTemp( 
+							UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)),
+							'wrapperAct')
+							,
+			inStructuredNode <- if (s.stereotype = 'pre')then
+										thisModule.resolveTemp( UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)),
+										'strucNodePre')			
+								else
+										if (s.stereotype = 'post')then
+												thisModule.resolveTemp( UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)),
+												'strucNodePost')	
+										else 
+											OclUndefined
+										endif
+								endif
+		)
+		,
+		vsa1 : UML!ValueSpecificationAction (
+			inStructuredNode <- if (s.stereotype = 'pre')then
+										thisModule.resolveTemp( UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)),
+										'strucNodePre')			
+								else
+										if (s.stereotype = 'post')then
+												thisModule.resolveTemp( UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)),
+												'strucNodePost')	
+										else 
+											OclUndefined
+										endif
+								endif,
+			value <- vsav1,
+			result <- vsar1
+		),
+				vsar1 : UML!OutputPin,
+				vsav1 : UML!LiteralBoolean (
+						value <- true
+				),
+		
+		objFlow_true_assert:  UML!ObjectFlow(
+			source <- vsar1,
+			target <-  assrtEqls_t1b, 
+			activity <- thisModule.resolveTemp( 
+							UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)),
+							'wrapperAct'),
+			inStructuredNode <- if (s.stereotype = 'pre')then
+										thisModule.resolveTemp( UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)),
+										'strucNodePre')			
+								else
+										if (s.stereotype = 'post')then
+												thisModule.resolveTemp( UML!Operation.allInstancesFrom('IN')->any(i | s.name.endsWith(i.name)),
+												'strucNodePost')	
+										else 
+											OclUndefined
+										endif
+								endif
+		)
+	
+}
+rule SelfVariableExp2ReadSelf {
+	from
+		s: ATL!VariableExp (
+			s.referredVariable.varName = 'self'
+		)
+	to
+		_: ATL!VariableExp,
+		t1: UML!ReadSelfAction (
+			name <- 'read self',
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <-thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			result <- result
+		),
+		result: UML!OutputPin (
+			name <- 'result'
+			
+		)
+}
+
+rule NavigationOrAttribussteCallExp2ReadStructuralFeatureAction {
+	from
+		s: ATL!NavigationOrAttributeCallExp --		(
+--			(s.getInference().oclIsUndefined() = false) and (thisModule.
+--					getNamesOfTheHelpers.excludes(s.name))
+--		)
+	
+	to
+		_: ATL!NavigationOrAttributeCallExp,
+		t1: UML!ReadStructuralFeatureAction (
+			name <- 'Read_' + s.name,
+			result <- result,
+			object <- t1b,
+			--			structuralFeature <- s.feature.class.allAttributes() -> any(a |
+-- a.name = s.
+--					name),
+--			structuralFeature <- s.feature.class.allAttributes() -> any(a | a.name = s.
+--				name),
+-- TODO: we assumed that properties having different names.
+			structuralFeature <- UML!Property.allInstances() -> any(a | a.name = s.name),
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo)
+		),
+		result: UML!OutputPin (
+			name <- 'result' --			lower <- 0,
+--			-- lowerBound in xMOF
+--			upper <- -1 -- upperBound in xMOF
+		),
+		t1b: UML!InputPin (
+			type <- s.feature.class,
+			name <- 'object' --			lower <- 1,			upper <- 1
+		),
+		t2: UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- thisModule.resolveTemp(s.source.toResult, 'result'),
+			target <- t1b
+		)
+}
+
+abstract rule OperationCallExp {
+	from
+		s: ATL!OperationCallExp
+	to
+		_: ATL!OperationCallExp
+}
+
+rule OperationCallExp_allInstances2ReadExtentAction extends OperationCallExp {
+	from
+		s: ATL!OperationCallExp (
+			s.operationName = 'allInstances'
+		)
+	to
+		_: ATL!OperationCallExp,
+		t1: UML!ReadExtentAction (
+			name <- s.source.name + '.allInstances()',
+			result <- result,
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			classifier <- s.source.name.class -- source must be an OclModelElement
+		),
+		result: UML!OutputPin (
+			name <- 'result',
+			lower <- 0,	-- lowerBound in xMOF
+			upper <- -1	-- upperBound in xMOF
+			
+		)
+}
+
+rule OperationCallExp_Debug2CallBehaviorAction extends OperationCallExp {
+	from
+		s: ATL!OperationCallExp (
+			s.operationName = 'debug'
+		)
+	to
+		_: ATL!OperationCallExp,
+		t1: UML!CallBehaviorAction (
+			name <- 'WriteLine(...)',
+			-- TODO: improve this in case the library changes?
+			behavior <- FUML!Behavior.allInstancesFrom('lib')->any(e |
+							e.name = 'WriteLine'
+						),
+			result <- resultop,
+			argument <- t1b,
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo)
+		),
+		resultop: UML!OutputPin (
+			name <- 'result' 			
+		),
+		result: UML!ForkNode (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			name <- 'result'
+			
+		),
+		t1b: UML!InputPin (
+			name <- 'list' --				, lower <- 1, upper <- -1
+			
+		),
+		t2: UML!ObjectFlow (
+			name <- 'probl TODO',
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- thisModule.resolveTemp(s.source.toResult, 'result'),
+			target <- result
+		),
+		of : UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- result,
+			target <- t1b
+		)
+}
+
+helper context ATL!OperationCallExp def: toSpecialRule : Boolean =
+	Sequence{
+		'debug',
+		'allInstances',
+		'=',
+		'<>',
+		'implies',
+		'oclIsKindOf',
+		'oclIsTypeOf',
+		'refSetValue',
+		'refDestroy',
+		'assertEquals',
+		'newInstance',
+		'toString'
+	}->includes(self.operationName);
+
+helper context ATL!OperationCallExp def: toFUMLBehaviorCall : Boolean =
+	if self.operationName = 'size' then
+		self.source.inferredType = 'String'.primitiveType
+	else
+		Sequence{
+			'>',
+			'*',
+			'+',
+			'-',
+			'/',
+			'<',
+			'>=',
+			'<=',
+			'and',
+			'or',
+			'xor',
+			'not',
+			'concat',
+			'substring'
+		}->includes(self.operationName)
+	endif;
+
+helper context ATL!OperationCallExp def: toALFBehaviorCall : Boolean =
+	if self.operationName = 'size' then
+		self.source.inferredType.isCollection
+	else
+		Sequence{
+			'isEmpty',
+			'notEmpty',
+			'includes',
+			'excludes',
+			'including',
+			'excluding',
+			'includesAll',
+			'excludesAll',
+			'union',
+			'intersection',
+			'at',
+			'first',
+			'last',
+			'count',
+			'insertAt',
+			'size'
+		}->includes(self.operationName)
+	endif;
+
+helper context ATL!OperationCallExp def: transformGenerically : Boolean =
+	not (self.toFUMLBehaviorCall or self.toALFBehaviorCall or self.toSpecialRule);
+
+helper context ATL!OperationCallExp def: target : ATL!Operation =
+	ATL!Operation.allInstancesFrom('helpers') -> any(o |
+		-- until we have full type
+		-- inference, we assume the type is the contextual Class, and the
+		-- operation is defined in ATL, not in UML
+--		o.typeName = self.feature.typeName
+		o.class = self.source.inferredType
+
+		and o.name = self.operationName
+	);
+					-- TODO: use getOperation(String name, parameters...) to
+					-- leverage type signature for UML operations
+
+helper context ATL!"OclType" def: lower : Integer =
+	1;	-- TODO: use 0 here because any value can be OclUndefined/null?
+
+helper context ATL!"OclType" def: upper : Integer =
+	1;
+
+helper context ATL!CollectionType def: lower : Integer =
+	0;
+
+helper context ATL!CollectionType def: upper : Integer =
+	-1;
+
+rule OperationCallExp_Helper2CallOperationAction extends OperationCallExp {
+	from
+		s: ATL!OperationCallExp (
+			s.transformGenerically
+		)
+	  to
+		_: ATL!OperationCallExp,
+		t1: UML!CallOperationAction (
+			name <- s.operationName + '()',
+			operation <- 
+						if (not(s.operationName.startsWith('body:'))) then		
+									thisModule.resolveTemp(s.target, 't1')
+						else
+							
+
+							 thisModule.resolveTemp(UML!Operation.allInstancesFrom('IN')->any(var | s.operationName.endsWith(var.name)), 'wrapperOp')
+						endif,		
+--				thisModule.resolveTemp(s.target, 't1'),
+			result <- result,
+			argument <- s.target.parameters->collect(p |
+							thisModule.resolveTemp(Tuple {s = s, p = p}, 't') ),
+			target <- t1b,
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo)
+		),
+		result: UML!OutputPin (
+			name <- 'result',
+			lower <- s.target.returnType.lower,
+			upper <- s.target.returnType.upper
+		),
+		t1b: UML!InputPin (
+			name <- 'target' --,			lower <- 1,			upper <- -1... TODO: can we have a helper on a Collection?
+			
+		),
+		t2: UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- thisModule.resolveTemp(s.source.toResult, 'result'),
+			target <- t1b
+		)
+}
+
+helper context ATL!OperationCallExp def: getOperationArgumentFor(p : ATL!Parameter) : ATL!OclExpression =
+	self.arguments->at(self.target.parameters->indexOf(p));
+
+helper context ATL!OperationCallExp def: hasParam(p : ATL!Parameter) : Boolean =
+	if self.transformGenerically then
+		if self.target.oclIsUndefined() then
+			false.debug('error: target of ' + self.operationName + '@' + self.location + ' not found')
+		else
+			self.target.parameters->includes(p)
+		endif
+	else
+		false
+	endif;
+
+rule HelperArgument {
+	from
+		s : ATL!OperationCallExp,
+		p : ATL!Parameter (
+			s.hasParam(p)
+		)
+	to
+		_ : ATL!OperationCallExp,
+		t : UML!InputPin (
+			name <- p.varName,
+			lower <- p.type.lower,
+			upper <- p.type.upper
+		),
+		t2: UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- thisModule.resolveTemp(s.getOperationArgumentFor(p).toResult, 'result'),
+			target <- t
+		)
+}
+
+helper context ATL!OperationCallExp def: helperArgumentHasControlFlowFor(p : UML!Parameter) : Boolean =
+	if p.type.lower = 0 then
+		not self.getOperationArgumentFor(p).controlFlowSource.oclIsUndefined()
+	else
+		false
+	endif;
+
+rule HelperArgument_WithControlFlow extends HelperArgument {
+	from
+		s : ATL!OperationCallExp,
+		p : ATL!Parameter (
+			s.helperArgumentHasControlFlowFor(p)
+		)
+	  to
+		_: ATL!OperationCallExp,
+		cf : UML!ControlFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- thisModule.resolveTemp(s.getOperationArgumentFor(p).controlFlowSource, 't1'),
+			target <- thisModule.resolveTemp(s, 't1')
+		)
+}
+
+helper context String def: firstToUpper : String =
+	self.substring(1, 1).toUpper() + self.substring(2, self.size());
+
+-- TODO: rename into targetBehavior
+helper context ATL!OperationCallExp def: targetOperation : UML!Behavior =
+	if self.toFUMLBehaviorCall then
+		FUML!Behavior.allInstancesFrom('lib') -> any(e |
+			e.name.toLower() = self.operationName.toLower()
+		)
+	else if self.toALFBehaviorCall then
+		ALF!Behavior.allInstancesFrom('lib_ALF')->reject(e |
+			e.name.oclIsUndefined()
+		)->select(e |
+			e.parameters->notEmpty()
+		)->any(e |
+			e.name = self.operationName.firstToUpper
+--			and
+--			if self.source.inferredType.isCollection then
+--				e.parameters->first().upper = -1
+--			else
+--				e.parameters->first().upper = 1
+--			endif
+		)--.debug('target for ' + self.operationName)
+	else
+		OclUndefined	-- TODO: UML!Operations predefined in input model
+	endif endif;
+
+helper context ATL!OperationCallExp def: toBehaviorCall : Boolean =
+	self.toFUMLBehaviorCall or self.toALFBehaviorCall;
+
+helper context ATL!OperationCallExp def: getArgumentFor(p : UML!Parameter) : ATL!OclExpression =
+	self.arguments->at(self.parameters->indexOf(p) - 1);
+
+helper context ATL!OperationCallExp def: hasNonFirstInParam(p : UML!Parameter) : ATL!OclExpression =
+	if self.toBehaviorCall then
+		p.direction <> #return and self.parameters->indexOf(p) > 1
+	else
+		false
+	endif;
+
+rule OperationArgument {
+	from
+		s : ATL!OperationCallExp,
+		p : FUML!Parameter (
+			s.hasNonFirstInParam(p)
+		)
+	to
+		_ : ATL!OperationCallExp,
+		t : UML!InputPin (
+			name <- p.name,
+			lower <- p.lower,
+			upper <- p.upper
+		),
+		t2: UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- thisModule.resolveTemp(s.getArgumentFor(p).toResult, 'result'),
+			target <- t
+		)
+}
+
+helper context ATL!OperationCallExp def: hasControlFlowFor(p : UML!Parameter) : ATL!OclExpression =
+	if p.lower = 0 then
+		not self.getArgumentFor(p).controlFlowSource.oclIsUndefined()
+	else
+		false
+	endif;
+
+rule OperationArgument_WithControlFlow extends OperationArgument {
+	from
+		s : ATL!OperationCallExp,
+		p : FUML!Parameter (
+			s.hasControlFlowFor(p)
+		)
+	  to
+		_: ATL!OperationCallExp,
+		cf : UML!ControlFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- thisModule.resolveTemp(s.getArgumentFor(p).controlFlowSource, 't1'),
+			target <- thisModule.resolveTemp(s, 't1')
+		)
+}
+
+
+helper context UML!Behavior def: parameters : OrderedSet(UML!Parameter) =
+	self.ownedParameter->reject(e | e.direction = #return);
+
+helper context ATL!OperationCallExp def: parameters : OrderedSet(UML!Parameter) =
+	self.targetOperation.parameters;
+
+helper context ATL!OperationCallExp def: firstParameter : UML!Parameter =
+	self.parameters->first();
+
+helper context ATL!OperationCallExp def: resultParameter : UML!Parameter =
+	self.targetOperation.ownedParameter->any(p | p.direction = #return);
+
+rule OperationCallExp2LibraryBehaviorCall extends OperationCallExp {
+	from
+		s: ATL!OperationCallExp (
+			s.toBehaviorCall
+		)
+	  to
+		_: ATL!OperationCallExp,
+		t1: UML!CallBehaviorAction (
+			name <- 'call ' + s.operationName,
+			behavior <- s.targetOperation,
+			result <- result,
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			argument <- Sequence{t1a}->union(
+							let params : Sequence(UML!Parameter) = s.targetOperation.ownedParameter in
+							params->excluding(params->first())->reject(p |
+								p.direction = #return
+							)->collect(p |
+								thisModule.resolveTemp(Tuple {s = s, p = p}, 't')
+							)--.debug('resolved params for ' + s.operationName)
+						)
+		),
+		result: UML!OutputPin (
+			name <- s.resultParameter.name,
+			lower <- s.resultParameter.lower,
+			upper <- s.resultParameter.upper
+		),
+		t1a: UML!InputPin (
+			name <- s.firstParameter.name,
+			lower <- s.firstParameter.lower,
+			upper <- s.firstParameter.upper
+		),
+		t2: UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- thisModule.resolveTemp(s.source.toResult, 'result'),
+			target <- t1a
+		)
+}
+
+rule OperationCallExp2LibraryBehaviorCall_WithControlFlow extends OperationCallExp2LibraryBehaviorCall {
+	from
+		s: ATL!OperationCallExp (
+			s.firstParameter.lower = 0 and not s.source.controlFlowSource.oclIsUndefined()
+		)
+	  to
+		_: ATL!OperationCallExp,
+		cf : UML!ControlFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- thisModule.resolveTemp(s.source.controlFlowSource, 't1'),
+			target <- t1
+		)
+}
+
+rule OperationCallExp_Boolean_Implies2CallOperationAction extends
+		OperationCallExp {
+	from
+		s: ATL!OperationCallExp (
+			s.operationName = 'implies'
+		)
+	  to
+		_: ATL!OperationCallExp,
+		cb: UML!CallBehaviorAction (
+			name <- 'call ' + s.operationName,
+			behavior <- FUML!Behavior.allInstancesFrom('lib') -> any(e | e.name.toLower()
+					= 'implies'),
+			result <- t1res,
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			
+			argument <- Sequence{t1a,
+						t1b}
+		),
+		t1res: UML!OutputPin (
+			name <- 'result'
+		),
+		t1a: UML!InputPin (
+			name <- 'x'
+		),
+		t1b: UML!InputPin (
+			name <- 'y'
+		),
+		t2: UML!ValueSpecificationAction (
+			name <- 'true',
+			value <- LitBoolean,
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			result <- t2res
+		),
+		LitBoolean: UML!LiteralBoolean (
+			value <- true
+		),
+		t2res: UML!OutputPin (
+		),
+		
+		forkNd: UML!ForkNode (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo)
+		),
+		decNode: UML!DecisionNode (
+--			decisionInputFlow <- fork2decNod,
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo)
+		),
+		result: UML!MergeNode (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo)
+		),
+		controlFlow1: UML!ControlFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			guard <- LiteralBoolean_cntrlFlow1,
+			source <- decNode,
+			target <- cb
+		),
+		LiteralBoolean_cntrlFlow1: UML!LiteralBoolean (
+			value <- true
+		),
+		controlFlow2: UML!ControlFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			guard <- LiteralBoolean_cntrlFlow2,
+			source <- decNode,
+			target <- t2
+		),
+		LiteralBoolean_cntrlFlow2: UML!LiteralBoolean (
+			value <- false
+		),
+		fork2callImplies: UML!ObjectFlow (
+			name <- 'fork2callImplies',
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- forkNd,
+			target <- t1a
+		),
+		fork2decNod: UML!ObjectFlow (
+			name <- 'fork2decNod',
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- forkNd,
+			target <- decNode
+		),
+		implies2result: UML!ObjectFlow (
+			name <- 'fork2decNod',
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- t1res,
+			target <- result
+		),
+		true2result: UML!ObjectFlow (
+			name <- 'fork2decNod',
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- t2res,
+			target <- result
+		),
+		in1: UML!ObjectFlow (
+			name <- 'in1',
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- thisModule.resolveTemp(s.source.toResult, 'result'),
+			target <-  forkNd 
+		),
+		in2: UML!ObjectFlow (
+			name <- 'in2',
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- thisModule.resolveTemp(s.arguments.first().toResult, 'result'),
+			target <- t1b
+		),
+-- ControlFlow source
+		t1 : UML!MergeNode (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo)
+		),
+			cf1 : UML!ControlFlow (
+				activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+				inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+				source <- cb,
+				target <- t1
+			),
+			cf2 : UML!ControlFlow (
+				activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+				inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+				source <- t2,
+				target <- t1
+			)
+}
+
+rule OperationCallExp_Boolean_Integer_toString2CallOperationAction extends
+		OperationCallExp {
+	from
+		s: ATL!OperationCallExp (
+			s.operationName = 'toString' -- used for boolean and integer types
+		
+		)
+	  to
+		_: ATL!OperationCallExp,
+		t1: UML!CallBehaviorAction (
+			name <- 'call ToString',
+			behavior <- FUML!Behavior.allInstancesFrom('lib') -> any(e | e.name =
+					'ToString' and e.refImmediateComposite().name = 'BooleanFunctions'),
+			result <- result1,
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			
+			argument <- source1
+		),
+		result1: UML!OutputPin (
+			name <- 'result'
+		),
+		source1: UML!InputPin (
+			name <- 'x'
+		),
+		obj_ToString_Boolean1: UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- source,
+			target <- source1
+		),
+		obj_ToString_Boolean2: UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- result1,
+			target <- result
+		),
+		t2: UML!CallBehaviorAction (
+			name <- 'call ToString',
+			behavior <- FUML!Behavior.allInstancesFrom('lib') -> any(e | e.name =
+					'ToString' and e.refImmediateComposite().name = 'IntegerFunctions'),
+			result <- result2,
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			
+			argument <- source2
+		),
+		result2: UML!OutputPin (
+			name <- 'result'
+		),
+		source2: UML!InputPin (
+			name <- 'x'
+		),
+		obj_ToString_Integer1: UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- source,
+			target <- source2
+		),
+		obj_ToString_Integer2: UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- result2,
+			target <- result
+		),
+		result: UML!DecisionNode (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			name <- 'result_toString'
+		),
+		source: UML!ForkNode (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			name <- 'source_tostring'
+		),
+		objFlow_tostring: UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- thisModule.resolveTemp(s.source.toResult, 'result'),
+			target <- source
+		)
+			
+}
+
+----------------------------------------
+--IntegerExp - StringExp - BooleanExp --
+----------------------------------------
+rule IntegerExp2ValueSpecificationAction {
+	from
+		s: ATL!IntegerExp
+	to
+		_: ATL!IntegerExp,
+		t1: UML!ValueSpecificationAction (
+			name <- 'value ' + s.integerSymbol.toString(),
+			value <- litInteger,
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			result <- result
+		),
+		litInteger: UML!LiteralInteger (
+			value <- s.integerSymbol.toString().toInteger()
+		),
+		result: UML!OutputPin (
+			name <- 'result'
+		)
+}
+
+
+-- TODO: not in some cases like first argument of refSetValue?
+-- but only a problem if we actually use pseudo-OCL
+rule StringExp2ValueSpecificationAction {
+	from
+		s: ATL!StringExp
+	to
+		_: ATL!StringExp,
+		t1: UML!ValueSpecificationAction (
+			name <- 'value ' + s.stringSymbol.toString(),
+			value <- LitString,
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			result <- result
+		),
+		LitString: UML!LiteralString (
+			value <- s.stringSymbol
+		),
+		result: UML!OutputPin (
+			name <- 'result'
+		)
+}
+
+rule BooleanExp2ValueSpecificationAction {
+	from
+		s: ATL!BooleanExp
+	to
+		_: ATL!BooleanExp,
+		t1: UML!ValueSpecificationAction (
+			name <- 'value' + s.booleanSymbol.toString(),
+			value <- LitBoolean,
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			result <- result
+		),
+		LitBoolean: UML!LiteralBoolean (
+			value <- s.booleanSymbol
+		),
+		result: UML!OutputPin (
+			name <- 'result'
+		)
+}
+
+---------------------------------------------------
+--IteratorExp having 'select' or 'reject' as a name.
+---------------------------------------------------
+abstract rule IteratorExp2ExpansioRegion_decisionNode_twoExpansionNode {
+	from
+		s: ATL!IteratorExp (
+			s.name = 'select' or s.name = 'reject'
+		)
+	to
+		_: ATL!IteratorExp,
+		decisionNode: UML!DecisionNode (
+			decisionInputFlow <- thisModule.resolveTemp(s, 't12'),
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s, 't1')
+		),
+		inputNode: UML!ExpansionNode (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo)
+		),
+		result: UML!ExpansionNode (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo)
+		),
+		t2: UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			name <- 'ObjectFlow1',
+			source <- thisModule.resolveTemp(s.source.toResult, 'result'),
+			target <- inputNode
+		),
+		t11: UML!ObjectFlow (
+			name <- 'ObjectFlow2',
+			source <- thisModule.resolveTemp(s.iterators->first(), 'result'),
+			target <- decisionNode,
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s, 't1')
+		),
+		t13: UML!ObjectFlow (
+			name <- 'ObjectFlow4',
+			source <- decisionNode,
+			target <- result,
+			guard <- t14,
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s, 't1')
+		),
+		t14: UML!LiteralBoolean (
+			value <- true
+		)
+}
+
+---------------------------------------------------
+--IteratorExp having 'select'  as a name.
+---------------------------------------------------
+rule Select_IteratorExp2ObjectFlow extends
+		IteratorExp2ExpansioRegion_decisionNode_twoExpansionNode {
+	from 
+		s: ATL!IteratorExp (
+			s.name = 'select'
+		)
+	to
+		_: ATL!IteratorExp,
+		t1: UML!ExpansionRegion (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			name <- 'Expansion Region',
+			inputElement <- inputNode,
+			outputElement <- result
+		),
+		t12: UML!ObjectFlow (
+			name <- 'ObjectFlow3',
+			source <- thisModule.resolveTemp(s.body.toResult, 'result'),
+			target <- decisionNode,
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s, 't1')
+		)
+		 
+	 }
+
+---------------------------------------------------
+--IteratorExp having 'reject' as a name.
+---------------------------------------------------
+rule Reject_IteratorExp2ObjectFlow extends
+		IteratorExp2ExpansioRegion_decisionNode_twoExpansionNode {
+	from
+		s: ATL!IteratorExp (
+			s.name = 'reject'
+		)
+	to
+		_: ATL!IteratorExp,
+		t1: UML!ExpansionRegion (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			name <- 'Expansion Region',
+			inputElement <- inputNode,
+			outputElement <- result
+		),
+		t12: UML!ObjectFlow (
+			name <- 'ObjectFlow3',
+			source <- outputNot,
+			target <- decisionNode,
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s, 't1')
+		),
+		t12a: UML!ObjectFlow (
+			name <- 'ObjectFlow3',
+			source <- thisModule.resolveTemp(s.body.toResult, 'result'),
+			target <- argumentNot,
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s, 't1')
+		),
+		callNot: UML!CallBehaviorAction (
+			name <- 'Call Not',
+			behavior <- FUML!Behavior.allInstancesFrom('lib') -> any(e | e.name = 'Not'),
+			result <- outputNot,
+			argument <- argumentNot,
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s, 't1')
+		),
+		outputNot: UML!OutputPin (
+			name <- 'result'
+		),
+		argumentNot: UML!InputPin (
+			name <- 'x'
+		)
+		 
+	 }
+
+---------------------------------------------------
+--IteratorExp having 'collect' as a name.
+---------------------------------------------------
+rule Collect {
+	from
+		s: ATL!IteratorExp (
+			s.name = 'collect'
+		)
+	to
+		_: ATL!IteratorExp,
+		t1: UML!ExpansionRegion (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			name <- 'Expansion Region',
+			inputElement <- inputNode,
+			outputElement <- result
+		),
+		inputNode: UML!ExpansionNode (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo)
+		),
+		result: UML!ExpansionNode (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo)
+		),
+		t2: UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- thisModule.resolveTemp(s.source.toResult, 'result'),
+			target <- inputNode
+		),
+		t13: UML!ObjectFlow (
+			source <- thisModule.resolveTemp(s.body.toResult, 'result'),
+			target <- result,
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s, 't1')
+		)
+}
+
+nodefault rule IteratorExp_WithControlFlow {
+	from
+		s: ATL!IteratorExp (
+			not s.source.controlFlowSource.oclIsUndefined()
+		)
+	to
+		_: ATL!IteratorExp,
+		cf : UML!ControlFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- thisModule.resolveTemp(s.source.controlFlowSource, 't1'),
+			target <- thisModule.resolveTemp(s, 't1')
+		)
+}
+
+---------------------------------------------------
+--IteratorExp having 'any' as a name.
+---------------------------------------------------
+rule IteratorExpAny2ExpansioRegion_decisionNode_twoExpansionNode {
+	from
+		s: ATL!IteratorExp (
+			s.name = 'any'
+		)
+	to
+		_: ATL!IteratorExp,
+		t1: UML!ExpansionRegion (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			name <- 'Expansion Region',
+			inputElement <- inputNode,
+			outputElement <- result0
+		),
+		decisionNode: UML!DecisionNode (
+			decisionInputFlow <- thisModule.resolveTemp(s, 't12'),
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s, 't1')
+		),
+		inputNode: UML!ExpansionNode (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo)
+		),
+		result0: UML!ExpansionNode (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo)
+		),
+		t2: UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			name <- 'ObjectFlow1',
+			source <- thisModule.resolveTemp(s.source.toResult, 'result'),
+			target <- inputNode
+		),
+		t11: UML!ObjectFlow (
+			name <- 'ObjectFlow2',
+			source <- thisModule.resolveTemp(s.iterators->first(), 'result'),
+			target <- decisionNode,
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s, 't1')
+		),
+		t13: UML!ObjectFlow (
+			name <- 'ObjectFlow4',
+			source <- decisionNode,
+			target <- result0,
+			guard <- t14,
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s, 't1')
+		),
+		t14: UML!LiteralBoolean (
+			value <- true
+		),
+		
+		t12: UML!ObjectFlow (
+			name <- 'ObjectFlow3',
+			source <- thisModule.resolveTemp(s.body.toResult, 'result'),
+			target <- decisionNode,
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s, 't1')
+		),
+		callFirst: UML!CallBehaviorAction (
+			name <- 'call first',
+			behavior <- ALF!Behavior.allInstancesFrom('lib_ALF') -> any(e | e.name =
+					'First'),
+			result <- result,
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			argument <- source
+		),
+		result: UML!OutputPin (
+			name <- 'result'
+		),
+		source: UML!InputPin (
+			name <- 'x',
+			lower <- 0,
+			upper <- -1
+		),
+		ObjFlow_t2: UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- result0,
+			target <- source
+		),		 
+		ObjFlow_t3: UML!ControlFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- t1,
+			target <- callFirst
+		)
+}
+
+rule IterateExp2ReduceAction {
+	from
+		s : ATL!IterateExp
+	to
+		_ : ATL!IterateExp,
+		t1 : UML!ReduceAction (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			collection <- source,
+			reducer <- activity,
+			result <- result,
+			isOrdered <- true
+		),
+			source : UML!InputPin (
+				name <- 'collection',
+				upper <- -1
+			),
+				j : UML!JoinNode (
+					activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+					inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo)
+				),
+				sofInit : UML!ObjectFlow (	-- sofInit must come before sofSource for ordered input... it may be better to initialize the opposite to avoid this orderding constraint
+					activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+					inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+					source <- thisModule.resolveTemp(s.result.initExpression.toResult, 'result'),
+					target <- j
+				),
+				sofSource : UML!ObjectFlow (
+					activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+					inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+					source <- thisModule.resolveTemp(s.source.toResult, 'result'),
+					target <- j
+				),
+				sofCollection : UML!ObjectFlow (
+					activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+					inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+					source <- j,
+					target <- source
+				),
+			result : UML!OutputPin (
+				name <- 'result'
+			),
+			activity : UML!Activity -> (thisModule.resolveTemp(s.feature, 'activity').ownedBehavior) (
+				name <- 'IterateExp_body',
+				ownedParameter <- OrderedSet {
+									s.result,
+									s.iterators->first()	-- only works with a single iterator
+								}->collect(p |
+									thisModule.resolveTemp(p, 'actP')
+								)->append(actRet),
+				ownedNode <- OrderedSet {
+								s.result,
+								s.iterators->first()
+							}->collect(p |
+								thisModule.resolveTemp(p, 'actPN')
+							)->append(resultAPN),
+				edge <- t2
+			),
+				actRet: UML!Parameter (
+					name <- 'result',
+					direction <- #return
+				),
+				resultAPN: UML!ActivityParameterNode (
+					name <- 'result',
+					parameter <- actRet
+				),
+				t2: UML!ObjectFlow (
+					source <- thisModule.resolveTemp(s.body.toResult, 'result'),
+					target <- resultAPN
+				)
+}
+
+rule IterateIterator2Parameter extends VariableDeclaration2ForkNode {
+	from
+		s : ATL!Iterator (
+			s.loopExpr.oclIsKindOf(ATL!IterateExp)
+		)
+	to
+		_ : ATL!Iterator,
+		result : UML!ForkNode (
+			activity <- thisModule.resolveTemp(s.loopExpr, 'activity')
+		),
+		actP: UML!Parameter (
+			name <- s.varName
+		),
+		actPN: UML!ActivityParameterNode (
+			name <- s.varName,
+			parameter <- actP
+		),
+		of : UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.loopExpr, 'activity'),
+--TODO?			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- actPN,
+			target <- result
+		)
+}
+
+rule IterateAccumulator2Parameter extends VariableDeclaration2ForkNode {
+	from
+		s : ATL!VariableDeclaration (
+			s.baseExp.oclIsKindOf(ATL!IterateExp)
+		)
+	to
+		_ : ATL!VariableDeclaration,
+		result : UML!ForkNode (
+			activity <- thisModule.resolveTemp(s.baseExp, 'activity')
+		),
+		actP: UML!Parameter (
+			name <- s.varName
+		),
+		actPN: UML!ActivityParameterNode (
+			name <- s.varName,
+			parameter <- actP
+		),
+		of : UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.baseExp, 'activity'),
+--TODO?			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- actPN,
+			target <- result
+		)
+}
+
+---------------------------------------------------
+-- rule Iterator2fork_and_objectFlow, which aims to tranforming an Iterator having
+-- 'select', 'reject' or 'collect' as a loopExpr.name.
+---------------------------------------------------
+rule Iterator2fork_and_objectFlow extends VariableDeclaration2ForkNode {
+	from
+		s: ATL!Iterator (
+			s.loopExpr.oclIsKindOf(ATL!IteratorExp)
+		)
+	to
+		_: ATL!Iterator,
+		t3: UML!ObjectFlow (
+			name <- 'Iterator',
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			target <- result,
+			source <- thisModule.resolveTemp(s.loopExpr, 'inputNode')
+		)
+}
+
+-- rename target element to t1: newInstance, refDestroy
+
+-- IterateExp
+-- NavigationOrAttributeCallExp
+-- LiteralExp
+-- IteratorExp
+helper context ATL!OclExpression def: controlFlowSource : ATL!OclExpression =
+	self;
+
+-- DONE: possible problems: implies, toString
+-- TODO: <>: callNot should be t1 (because it is the last action)?
+helper context ATL!OperationCallExp def: controlFlowSource : ATL!OclExpression =
+	if self.operationName = 'debug' then
+		self.source.controlFlowSource	-- if we wanted to make sure the WriteLine to happen first, we would need to put it in an ExpansionRegion and make control flow pass "through" it
+	else
+		self
+	endif;
+
+helper context ATL!VariableExp def: controlFlowSource : ATL!OclExpression =
+	let var : ATL!VariableDeclaration = self.referredVariable in
+	if var.varName = 'self' then
+		self
+	else if not var.letExp.oclIsUndefined() then
+		var.initExpression.controlFlowSource
+	else	-- Parameter, Iterator or Iterate.result
+		OclUndefined
+	endif endif;
+
+helper context ATL!LetExp def: controlFlowSource : ATL!OclExpression =
+	self.in_.controlFlowSource;
+
+helper context ATL!CollectionExp def: controlFlowSource : ATL!OclExpression =
+	let l : ATL!OclExpression = self.elements->last() in
+	if l.oclIsUndefined() then
+		OclUndefined
+	else
+		l.controlFlowSource
+	endif;
+
+
+helper context ATL!OclExpression def: controlFlowTarget : ATL!OclExpression =
+	self;
+
+helper context ATL!VariableExp def: controlFlowTarget : ATL!OclExpression =
+	if self.referredVariable.varName = 'self' then
+		self
+	else
+		OclUndefined
+	endif;
+
+helper context ATL!CollectionExp def: controlFlowTarget : ATL!OclExpression =
+	let f : ATL!OclExpression = self.elements->first() in
+	if f.oclIsUndefined() then
+		OclUndefined
+	else
+		f.controlFlowTarget
+	endif;
+
+rule CollectionExp2JoinNode {
+	from
+		s: ATL!CollectionExp
+	to
+		_: ATL!CollectionExp,
+		result: UML!JoinNode (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			name <- 'result'
+		)
+}
+
+-- DONE: add ControlFlows between elements for Sequence & OrderedSet
+-- to preserve ordering... and maybe even for Set & Bag because we would
+-- need to know which element is the last for ControlFlow to ExpansionRegion
+rule CollectionElement {
+	from
+		c: ATL!CollectionExp,
+		e: ATL!OclExpression (
+			e.collection = c
+		)
+	to
+		_: ATL!CollectionExp,
+		objectflowtoElements: UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(e.feature, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(c.inStructuredNode.target, c.inStructuredNode.resolveTo),
+			source <- thisModule.resolveTemp(e.toResult, 'result'),
+			target <- thisModule.resolveTemp(c, 'result')
+		)
+}
+
+rule NonFirstCollectionElement extends CollectionElement {
+	from
+		c: ATL!CollectionExp,
+		e: ATL!OclExpression (
+			c.elements->indexOf(e) > 1 and
+			not e.controlFlowTarget.oclIsUndefined()
+		)
+	to
+		_: ATL!CollectionExp,
+		cf : UML!ControlFlow (
+			activity <- thisModule.resolveTemp(e.feature, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(c.inStructuredNode.target, c.inStructuredNode.resolveTo),
+			source <- thisModule.resolveTemp(c.elements->at(c.elements->indexOf(e) - 1).controlFlowSource, 't1'),
+			target <- thisModule.resolveTemp(e.controlFlowTarget, 't1')
+		)
+}
+
+------------------------------------------------------------------------------------
+-- rule 'OperationCallExp_Equals2TestIdentityAction'
+-- Create TestIdentityAction from OperationCallExp having '=' as an operationName.
+------------------------------------------------------------------------------------
+rule OperationCallEdddxp_Equals2TestIdentityAction {
+	from
+		s: ATL!OperationCallExp (
+			s.operationName = '='
+		)
+	to
+		_: ATL!OperationCallExp,
+		t1: UML!TestIdentityAction (
+			name <- 'Test Identity Action',
+			result <- result,
+			first <- t1a,
+			second <- t1b,
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo)
+		),
+		result: UML!OutputPin (
+			name <- 'result'
+		),
+		t1a: UML!InputPin (
+			name <- 'first'
+		),
+		t1b: UML!InputPin (
+			name <- 'second'
+		),
+		t2: UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- thisModule.resolveTemp(s.source.toResult, 'result'),
+			target <- t1b
+		),
+		t3: UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- thisModule.resolveTemp(s.arguments.first().toResult, 'result'),
+			target <- t1a
+		)
+}
+
+---- the comparison operators <>
+rule OperationCallEdddxp_different2TestIdentityAction {
+	from
+		s: ATL!OperationCallExp (
+			(s.operationName = '<>')
+		)
+	to
+		_: ATL!OperationCallExp,
+		t1: UML!TestIdentityAction (
+			name <- 'Test Identity Action',
+			result <- resultTestIdentityAction,
+			first <- t1a,
+			second <- t1b,
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo)
+		),
+		resultTestIdentityAction: UML!OutputPin (
+			name <- 'result'
+		),
+		t1a: UML!InputPin (
+			name <- 'first'
+		),
+		t1b: UML!InputPin (
+			name <- 'second'
+		),
+		t2: UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- thisModule.resolveTemp(s.source.toResult, 'result'),
+			target <- t1b
+		),
+		t3: UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- thisModule.resolveTemp(s.arguments.first().toResult, 'result'),
+			target <- t1a
+		),
+		callNot: UML!CallBehaviorAction (
+			name <- 'Call Not',
+			behavior <- FUML!Behavior.allInstancesFrom('lib') -> any(e | e.name = 'Not'),
+			result <- result,
+			argument <- argumentNot,
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo)
+		),
+		result: UML!OutputPin (
+			name <- 'result'
+		),
+		argumentNot: UML!InputPin (
+			name <- 'x'
+		),
+		obj: UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- resultTestIdentityAction,
+			target <- argumentNot
+		)
+}
+
+helper context ATL!OclModelElement def: typeName : String =
+	self.name;
+
+helper context ATL!BooleanType def: typeName : String =
+	'Boolean';
+
+helper context ATL!IntegerType def: typeName : String =
+	'Integer';
+
+helper context ATL!RealType def: typeName : String =
+	'Real';
+
+helper context ATL!StringType def: typeName : String =
+	'String';
+
+-- only if operationName = oclIs{Kind,Type}Of
+helper context ATL!OperationCallExp def: type : OclType =
+	self.arguments->first();
+
+abstract rule OclIsKindOf {
+	from
+		s: ATL!OperationCallExp (
+			s.operationName = 'oclIsKindOf' or
+			s.operationName = 'oclIsTypeOf'
+		)
+	to
+		_: ATL!OperationCallExp
+}
+
+rule OclIsKindOf2LiteralTrue extends OclIsKindOf {
+	from
+		s: ATL!OperationCallExp (
+			s.type.oclIsKindOf(ATL!OclAnyType)
+		)
+	to
+		_: ATL!OperationCallExp,
+		t1: UML!ValueSpecificationAction (
+			name <- s.operationName + '(OclAny)',
+			value <- LitBoolean,
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			result <- result
+		),
+		LitBoolean: UML!LiteralBoolean (
+			value <- s.operationName = 'oclIsKindOf'
+		),
+		result: UML!OutputPin (
+			name <- 'result'
+		)
+}
+
+rule OclIsKindOf2ReadIsClassifiedObjectAction extends OclIsKindOf {
+	from
+		s: ATL!OperationCallExp
+--		(	-- implicit
+--			not type.oclIsKindOf(ATL!OclAnyType)
+--		)
+	using {
+		type : OclType = s.arguments->first();
+	}
+	to
+		_: ATL!OperationCallExp,
+		t1: UML!ReadIsClassifiedObjectAction (
+			name <- 'Is ' + s.type.typeName,
+			result <- result,
+			object <- t1b,
+			isDirect <- s.operationName = 'oclIsTypeOf',
+			classifier <-
+				if		s.type.oclIsKindOf(ATL!IntegerType) or
+						s.type.oclIsKindOf(ATL!StringType) or
+						s.type.oclIsKindOf(ATL!BooleanType)
+				then
+					UML!PrimitiveType.allInstancesFrom('UMLPrimitiveTypes')->any(e |
+						e.name = s.type.typeName
+					)
+				else
+					UML!Class.allInstances() -> any(i | i.name = s.type.typeName)
+				endif,
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo)
+		),
+		result: UML!OutputPin (
+			name <- 'result'
+		),
+		t1b: UML!InputPin (
+			name <- 'object'
+		),
+		t2: UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- thisModule.resolveTemp(s.source.toResult, 'result'),
+			target <- t1b
+		)
+}
+
+---------------------------------------------------
+-- ifExp transformation
+---------------------------------------------------
+rule IfExp2objectFlow_controlFlow_decisionNode_fork {
+	from
+		s: ATL!IfExp
+	to
+		_: ATL!IfExp,
+		result: UML!MergeNode (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo)
+		),
+		ObjectFlow1: UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			target <- decisionNode,
+			source <- thisModule.resolveTemp(s.condition.toResult, 'result')
+		),
+		decisionNode: UML!DecisionNode (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo)
+		),
+		thenSAN : UML!StructuredActivityNode (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo)
+		),
+		ControlFlow1: UML!ControlFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			guard <- LiteralBoolean1,
+			target <- thenSAN,
+			source <- decisionNode
+		),
+		LiteralBoolean1: UML!LiteralBoolean (
+			value <- true
+		),
+		elseSAN : UML!StructuredActivityNode (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo)
+		),
+		ControlFlow2: UML!ControlFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			guard <- LiteralBoolean2,
+			target <- elseSAN,
+			source <- decisionNode
+		),
+		LiteralBoolean2: UML!LiteralBoolean (
+			value <- false
+		),
+		ObjectFlow2: UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			target <- result,
+			source <- thisModule.resolveTemp(s.thenExpression.toResult, 'result')
+		),
+		ObjectFlow3: UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			target <- result,
+			source <- thisModule.resolveTemp(s.elseExpression.toResult, 'result')
+		),
+-- for ControlFlow
+			t1 : UML!MergeNode (
+				activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+				inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo)
+			),
+				cfThen: UML!ControlFlow (
+					activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+					inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+					source <- thenSAN,
+					target <- t1
+				),
+				cfElse: UML!ControlFlow (
+					activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+					inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+					source <- elseSAN,
+					target <- t1
+				)
+}
+
+-- @begin OCL Constraints
+helper context ATL!Operation def: toOperation : UML!Operation =
+	let opName : String = self.name.split(':')->last() in
+	self.class.ownedOperation->any(e | e.name = opName);
+
+-- returns one of 'pre', 'post', 'body', 'inv'
+helper context ATL!Operation def: stereotype : String =
+	let parts : Sequence(String) = self.name.split(':') in
+	if parts->size() = 1 then
+		OclUndefined	-- if there is no ':', then no stereotype
+	else
+		parts->first()
+	endif;
+
+helper context UML!Operation def: constraints : OrderedSet(ATL!Operation) =
+	ATL!Operation.allInstancesFrom('helpers')->select(o |
+		o.toOperation = self
+	);
+
+helper context UML!Operation def: preconditions : OrderedSet(ATL!Operation) =
+	self.constraints->select(o |
+		o.stereotype = 'pre'
+	);
+
+helper context UML!Operation def: postconditions : OrderedSet(ATL!Operation) =
+	self.constraints->select(o |
+		o.stereotype = 'post'
+	);
+
+helper context UML!Class def: invariants : OrderedSet(ATL!Operation) =
+	ATL!Operation.allInstancesFrom('helpers')->select(o |
+		o.class = self
+	)->select(o |
+		o.stereotype = 'inv'
+	);
+
+rule OperationBody extends Operation2Activity {
+	from
+		s : ATL!Operation (
+			s.stereotype = 'body'
+		)
+	to
+		_ : ATL!Operation,
+		activity : UML!Activity -> (s.toOperation.method)
+}
+
+abstract rule OperationToWrap {
+	from
+		s : UML!Operation
+		(
+			s.preconditions->union(
+				s.postcondition
+			)->union(
+				s.class.invariants
+			)->notEmpty()
+		) 
+	to
+		t1 : UML!Operation (
+			name <- s.name + '_original',
+			method <- wrapperAct,
+			ownedParameter <-  t_Ret
+		),
+		t_Ret: UML!Parameter (
+			name <- 'result',
+			direction <- #return
+		),
+		wrapperOp : UML!Operation (
+			name <- s.name,
+			class <- s.class,
+			method <- wrapperAct,
+			ownedParameter <-  wrapperOp_Ret
+		),
+		wrapperOp_Ret: UML!Parameter (
+			name <- 'result',
+			direction <- #return
+		),
+		wrapperAct : UML!Activity -> (s.owner.ownedBehavior) (
+			name <- s.name + '_wrapper',
+			node <- callOp,
+			ownedParameter <- actRet
+		)
+		,
+		actRet: UML!Parameter (
+			name <- 'result',
+			direction <- #return
+		),
+		result: UML!ActivityParameterNode (
+			name <- 'result',
+			parameter <- actRet,
+			activity <- wrapperAct
+		),
+		callOp : UML!CallOperationAction(
+			name <- 'call'+s.name,
+			activity <- wrapperAct,
+			operation <- UML!Operation.allInstances()->any(var | var.name = s.name),
+			target <- callOp_target,
+			result <- callOp_result
+		),
+		callOp_result : UML!OutputPin,
+		callOp_target : UML!InputPin (
+		name <- 'target'
+		),
+		readSelf : UML!ReadSelfAction(
+			activity <- wrapperAct,
+			result <- readSelf_result
+		),
+		readSelf_result : UML!OutputPin,
+		obj_readself2callOp : UML!ObjectFlow(
+			activity <- wrapperAct,
+			source <- readSelf_result,
+			target <- callOp_target
+		),
+		
+		strucNodePre  : UML!StructuredActivityNode(
+			activity <- wrapperAct, 
+			name <- 'precondition'
+		),
+		objFowToResult : UML!ObjectFlow(
+			source <- callOp_result,
+			target <- result,
+			activity <- wrapperAct
+		),
+		strucNodePost : UML!StructuredActivityNode(
+			activity <- wrapperAct, 
+			name <- 'postcondition'
+		),
+		cntlFlow1: UML!ControlFlow(
+			source <- strucNodePre,
+			target <- readSelf,
+			activity <- wrapperAct
+		),	
+		cntlFlow2: UML!ControlFlow(
+			source <- callOp,
+			target <- strucNodePost,
+			activity <- wrapperAct
+		)
+}
+
+rule operationInClassWithoutInvariant2Wrap extends OperationToWrap{
+	from 
+		s : UML!Operation 
+		(
+			s.class.invariants->isEmpty()
+		)
+	to
+	t1: UML!Operation (
+			name <- s.name + '_original',
+			method <- wrapperAct,
+			ownedParameter <-  t_Ret
+		)
+}
+rule operationInClassWithInvariant2Wrap extends OperationToWrap{
+	from 
+		s : UML!Operation 
+		(
+			s.class.invariants->notEmpty()
+		)
+	to
+	t1: UML!Operation (
+			name <- s.name + '_original',
+			method <- wrapperAct,
+			ownedParameter <-  t_Ret
+		), 
+		
+	-- call inv as precondition
+	readSelf_ac : UML!ReadSelfAction(
+			activity <- thisModule.resolveTemp(s, 'wrapperAct'),		
+			inStructuredNode <- thisModule.resolveTemp(s, 'strucNodePre'),
+			result <- readSelf_result2
+		),
+	readSelf_result2 : UML!OutputPin,
+		
+	obj_readself2callOp2 : UML!ObjectFlow(
+			activity <- thisModule.resolveTemp(s, 'wrapperAct'),		
+			inStructuredNode <- thisModule.resolveTemp(s, 'strucNodePre'),
+			source <- readSelf_result2,
+			target <- callOp_target2
+		),
+		
+	callOp2 : UML!CallOperationAction(
+			name <- 'todo' ,
+			activity <- thisModule.resolveTemp(s, 'wrapperAct'),		
+			inStructuredNode <- thisModule.resolveTemp(s, 'strucNodePre'),
+			operation <- thisModule.resolveTemp( s.class, 'allinvOp'),
+			result <- callOp_result2,
+			target <- callOp_target2
+		),
+		
+	callOp_result2 : UML!OutputPin,
+	callOp_target2 : UML!InputPin(
+			name <- 'target'
+		),
+	objFlowToAssertEquals2 : UML!ObjectFlow(
+		source <- callOp_result2,
+		target <- assrtEqls_t1a2,
+		activity <- thisModule.resolveTemp(s, 'wrapperAct'),	
+		inStructuredNode <- thisModule.resolveTemp(s, 'strucNodePre')
+			
+		),
+	cntlFlow12: UML!ControlFlow(
+			source <- callOp2,
+			target <- assrtEqls2, 
+			activity <- thisModule.resolveTemp(s, 'wrapperAct'),
+			inStructuredNode <- thisModule.resolveTemp(s, 'strucNodePre')
+		),	
+	cntlFlow22: UML!ControlFlow(
+			source <- vsaOpName2,
+			target <- assrtEqls2, 
+			activity <- thisModule.resolveTemp(s, 'wrapperAct'),
+			inStructuredNode <- thisModule.resolveTemp(s, 'strucNodePre')
+		),	
+	cntlFlow3: UML!ControlFlow(
+			source <- vsa12 ,
+			target <- assrtEqls2, 
+			activity <- thisModule.resolveTemp(s, 'wrapperAct'),
+			inStructuredNode <- thisModule.resolveTemp(s, 'strucNodePre')
+		),		
+	assrtEqls2: UML!CallBehaviorAction (
+			name <- 'assertEquals',
+			behavior <- thisModule.resolveTemp(ATL!Unit.allInstancesFrom('helpers') -> first(), 'ae'),
+			result <- assrtEqls_result2,
+			activity <- thisModule.resolveTemp(s, 'wrapperAct'),
+			inStructuredNode <- thisModule.resolveTemp(s, 'strucNodePre'),
+			argument <- Sequence {assrtEqls_t1a2, assrtEqls_t1b2, assrtEqls_t1c2}
+		),
+	assrtEqls_result2: UML!OutputPin (
+			name <- 'result'
+		),
+	assrtEqls_t1a2: UML!InputPin (
+			name <- 'first',
+			upper <- -1,
+			lower <- 0
+		),
+	assrtEqls_t1b2: UML!InputPin (
+			name <- 'second',
+			upper <- -1,
+			lower <- 0
+		),
+	assrtEqls_t1c2: UML!InputPin (
+			name <- 'third'
+		),
+	vsaOpName2 : UML!ValueSpecificationAction (
+			activity <- thisModule.resolveTemp(s, 'wrapperAct'),
+			value <- vsaOpNamev2,
+			result <- vsaOpNamer2,
+			inStructuredNode <- thisModule.resolveTemp(s, 'strucNodePre')
+		),
+	vsaOpNamev2 : UML!LiteralString (
+			 value <- 'allInvOf'+s.class.name 
+		),
+	vsaOpNamer2 : UML!OutputPin
+	    ,
+	objFlow_nameOp_assertEquals2 : UML!ObjectFlow(
+			source <-  vsaOpNamer2,
+			target <-  assrtEqls_t1c2, 
+			activity <- thisModule.resolveTemp(s, 'wrapperAct'),
+			inStructuredNode <- thisModule.resolveTemp(s, 'strucNodePre')
+		)
+		,
+	vsa12 : UML!ValueSpecificationAction (
+			inStructuredNode <- thisModule.resolveTemp(s, 'strucNodePre'),
+			value <- vsav12,
+			result <- vsar12
+		),
+				vsar12 : UML!OutputPin,
+				vsav12 : UML!LiteralBoolean (
+						value <- true
+				),
+		
+	objFlow_true_assert2:  UML!ObjectFlow(
+			source <- vsar12,
+			target <-  assrtEqls_t1b2, 
+			activity <- thisModule.resolveTemp(s, 'wrapperAct'),
+			inStructuredNode <- thisModule.resolveTemp(s, 'strucNodePre')
+		),
+		
+-- call inv as postcondition
+	readSelf_post : UML!ReadSelfAction(
+			activity <- thisModule.resolveTemp(s, 'wrapperAct'),		
+			inStructuredNode <- thisModule.resolveTemp(s, 'strucNodePost')
+			,
+			result <- readSelf_result2a
+		),
+	readSelf_result2a : UML!OutputPin,
+		
+	obj_readself2callOp2a : UML!ObjectFlow(
+			activity <- thisModule.resolveTemp(s, 'wrapperAct'),		
+			inStructuredNode <- thisModule.resolveTemp(s, 'strucNodePost'),
+			source <- readSelf_result2a,
+			target <- callOp_target2a
+		),
+		
+	callOp2a : UML!CallOperationAction(
+			name <- 'todo' ,
+			activity <- thisModule.resolveTemp(s, 'wrapperAct'),		
+			inStructuredNode <- thisModule.resolveTemp(s, 'strucNodePost'),
+			operation <- thisModule.resolveTemp( s.class, 'allinvOp'),
+			result <- callOp_result2a,
+			target <- callOp_target2a
+		),
+		
+	callOp_result2a : UML!OutputPin,
+	callOp_target2a : UML!InputPin(
+			name <- 'target'
+		),
+	objFlowToAssertEquals2a : UML!ObjectFlow(
+		source <- callOp_result2a,
+		target <- assrtEqls_t1a2a,
+		activity <- thisModule.resolveTemp(s, 'wrapperAct'),	
+		inStructuredNode <- thisModule.resolveTemp(s, 'strucNodePost')
+		),
+	cntlFlow12a: UML!ControlFlow(
+			source <- callOp2a,
+			target <- assrtEqls2a, 
+			activity <- thisModule.resolveTemp(s, 'wrapperAct'),
+			inStructuredNode <- thisModule.resolveTemp(s, 'strucNodePost')
+		),	
+	cntlFlow22a: UML!ControlFlow(
+			source <- vsaOpName2a,
+			target <- assrtEqls2a, 
+			activity <- thisModule.resolveTemp(s, 'wrapperAct'),
+			inStructuredNode <- thisModule.resolveTemp(s, 'strucNodePost')
+		),	
+	cntlFlow3a: UML!ControlFlow(
+			source <- vsa12a ,
+			target <- assrtEqls2a, 
+			activity <- thisModule.resolveTemp(s, 'wrapperAct'),
+			inStructuredNode <- thisModule.resolveTemp(s, 'strucNodePost')
+		),		
+	assrtEqls2a: UML!CallBehaviorAction (
+			name <- 'assertEquals',
+			behavior <- thisModule.resolveTemp(ATL!Unit.allInstancesFrom('helpers') -> first(), 'ae'),
+			result <- assrtEqls_result2a,
+			activity <- thisModule.resolveTemp(s, 'wrapperAct'),
+			inStructuredNode <- thisModule.resolveTemp(s, 'strucNodePost'),
+			argument <- Sequence {assrtEqls_t1a2a, assrtEqls_t1b2a, assrtEqls_t1c2a}
+		),
+	assrtEqls_result2a: UML!OutputPin (
+			name <- 'result'
+		),
+	assrtEqls_t1a2a: UML!InputPin (
+			name <- 'first',
+			upper <- -1,
+			lower <- 0
+		),
+	assrtEqls_t1b2a: UML!InputPin (
+			name <- 'second',
+			upper <- -1,
+			lower <- 0
+		),
+	assrtEqls_t1c2a: UML!InputPin (
+			name <- 'third'
+		)
+		,
+	vsaOpName2a : UML!ValueSpecificationAction (
+			activity <- thisModule.resolveTemp(s, 'wrapperAct'),
+			value <- vsaOpNamev2a,
+			result <- vsaOpNamer2a,
+			inStructuredNode <- thisModule.resolveTemp(s, 'strucNodePost')
+		),
+	vsaOpNamev2a : UML!LiteralString (
+				value <- 'allInvOf'+s.class.name 
+		)
+		,
+	vsaOpNamer2a : UML!OutputPin,
+	objFlow_nameOp_assertEquals2a : UML!ObjectFlow(
+			source <-  vsaOpNamer2a,
+			target <-  assrtEqls_t1c2a, 
+			activity <- thisModule.resolveTemp(s, 'wrapperAct'),
+			inStructuredNode <- thisModule.resolveTemp(s, 'strucNodePost')
+		),
+	vsa12a : UML!ValueSpecificationAction (
+			inStructuredNode <- thisModule.resolveTemp(s, 'strucNodePost'),
+			value <- vsav12a,
+			result <- vsar12a                            
+		),
+	vsar12a : UML!OutputPin,
+	vsav12a : UML!LiteralBoolean (
+						value <- true
+		),
+		
+	objFlow_true_assert2a:  UML!ObjectFlow(
+			source <- vsar12a,
+			target <-  assrtEqls_t1b2a, 
+			activity <- thisModule.resolveTemp(s, 'wrapperAct'),
+			inStructuredNode <- thisModule.resolveTemp(s, 'strucNodePost')
+		)
+		
+}
+
+------zied
+rule class2allInv{
+	from 
+		s: UML!Class(
+		 	s.oclIsTypeOf(UML!Class) and ATL!Operation.allInstancesFrom('helpers')->select(i| (i.class = s and i.name.startsWith('inv:'))).notEmpty()
+			)
+	to
+		_:UML!Class,
+		allinvOp : UML!Operation -> (s.ownedOperation)  (
+			name <- 'allInvOf'+s.name,
+			method <- Allinv_Act
+			, 
+			ownedParameter <-  allinvOp_Ret
+		),
+		allinvOp_Ret: UML!Parameter (
+			name <- 'result',
+			direction <- #return
+		),
+		Allinv_Act : UML!Activity -> (s.ownedBehavior) (
+			name <- 'allInvOf'+s.name,
+			ownedParameter <- Allinv_Ret,
+			ownedNode <-result
+		),
+		Allinv_Ret: UML!Parameter (
+			name <- 'result',
+			direction <- #return
+		),
+		result: UML!ActivityParameterNode (
+			name <- 'result',
+			parameter <- Allinv_Ret
+		),		
+		callExcludes: UML!CallBehaviorAction (
+			name <- 'Call Excludes',
+			behavior <- FUML!Behavior.allInstancesFrom('lib_ALF') -> any(e | e.name = 'Excludes'),
+			result <- rest_callExcludes,
+			argument <- Sequence{argument1, argument2},
+			activity <- Allinv_Act
+		),
+		rest_callExcludes: UML!OutputPin (
+			name <- 'result'
+		),
+		argument1: UML!InputPin (
+			name <- 'x',
+			lower <- 1,
+			upper <- -1
+		),
+		argument2: UML!InputPin (
+			name <- 'y',
+			lower <- 1
+		),
+		valuSpecTrue: UML!ValueSpecificationAction (
+			name <- 'false',
+			value <- LitBoolean,
+			activity <- Allinv_Act,
+			result <- valuSpecTrue_res
+		),
+		valuSpecTrue_res: UML!OutputPin (
+		),
+		LitBoolean: UML!LiteralBoolean (
+			value <- false
+		),
+		fNode: UML!ForkNode(
+		activity <- Allinv_Act
+		),
+		objFlowfromFork: UML!ObjectFlow(
+			activity <- Allinv_Act,
+			source <- fNode,
+			target <- argument1
+		),
+		objFlowfromFalse: UML!ObjectFlow(
+			activity <- Allinv_Act,
+			source <- valuSpecTrue_res,
+			target <- argument2
+		),
+		objFlowToRet : UML!ObjectFlow (
+			activity <- Allinv_Act,
+			source <- rest_callExcludes,
+			target <- result
+			
+		)
+		
+}
+-- @end OCL Constraints
+
+-- @begin Pseudo-OCL to replace Alf
+rule ClassifierBehavior extends Operation2Operation {
+	from
+		s: ATL!Operation (
+			s.name = '__classifierBehavior__'
+		)
+	to
+		_: ATL!Operation,
+		activity : UML!Activity -> (s.class.refSetValue('isActive',
+				true).classifierBehavior) -- we allow ourselves to use refSetValue
+				-- because we are in Pseudo-OCL anyway
+	  }
+
+-- TODO: value.{lower=0,upper=-1} + ControlFlow?
+rule OperationCallExp_refSetValue2AddStructuralFeatureValueAction extends
+		OperationCallExp {
+	from
+		s: ATL!OperationCallExp (
+			s.operationName = 'refSetValue'
+		)
+	to
+		_ : ATL!OperationCallExp,
+		t1 : UML!AddStructuralFeatureValueAction (
+			name <- 'AddStructuralFeatureValue' + ' refSetValue',
+			--we assumed that properties having different names.
+			structuralFeature <-	UML!Property.allInstances()->any(a |
+										a.name = s.arguments->first().stringSymbol
+				 					),
+--						-- until we have full type inference, we assume the type is the
+--						-- contextual Class
+--						type.getAllAttributes() -> any(a | a.name = featureName),
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			object <- object,
+			value <- value,
+			result <- result
+		),
+		object: UML!InputPin (
+			name <- 'object' 
+--			lower <- 1,upper <- 1
+--			,
+--			type <- let featureName: String =
+--					s.arguments -> first().stringSymbol
+--				in
+--					s.feature.class
+		),
+		value: UML!InputPin (
+			name <- 'value' 
+--			lower <- 1, upper <- 1,
+--			type <- let featureName: String =
+--					s.arguments -> first().stringSymbol
+--				in
+--					-- first argument MUST be a StringExp
+--					let type: UML!Class =
+--						s.feature.class
+--					in
+--						-- until we have full type inference, we assume the type is the
+--								-- contextual Class
+--						type.getAllAttributes() -> any(a | a.name = featureName).type
+		),
+		result: UML!OutputPin (
+			name <- 'result' 
+--			lower <- 1,			upper <- 1
+--			,
+--			type <- let featureName: String =
+--					s.arguments -> first().stringSymbol
+--				in
+--					s.feature.class
+		),
+		of1: UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- thisModule.resolveTemp(s.source.toResult, 'result'),
+			target <- object
+		),
+		of2: UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- thisModule.resolveTemp(s.arguments -> last().toResult, 'result'),
+			target <- value
+		)
+}
+
+rule OperationCallExp2CreateObjectAction extends OperationCallExp {
+	from
+		s: ATL!OperationCallExp (
+			s.operationName = 'newInstance'
+		)
+	to
+		_ : ATL!OperationCallExp,
+		t1 : UML!CreateObjectAction (
+			name <- 'Create ' + s.source.name,
+			classifier <- let classifierName: String =
+					s.source.name
+				in
+					-- source argument MUST be an OclModelElement
+					UML!Classifier.allInstancesFrom('IN') -> any(e | e.name =
+							classifierName),
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			result <- result
+		),
+		result: UML!OutputPin (
+			name <- 'result',
+			lower <- 1,
+			upper <- 1
+		)
+}
+
+rule OperationCallExp2DestroyObjectAction extends OperationCallExp {
+	from
+		s: ATL!OperationCallExp (
+			s.operationName = 'refDestroy'
+		)
+	to
+		_ : ATL!OperationCallExp,
+		t1 : UML!DestroyObjectAction (
+			name <- 'Destroy',
+			target <- i,
+			-- WARNING: activity & inStructuredNode are containments
+			-- therefore inStructuredNode may perform some child-stealing, and must
+			-- appear after in the transformation (TODO: find a better solution)
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode, 't1')
+		),
+		i: UML!InputPin (
+			name <- 'target',
+			lower <- 1,
+			upper <- 1
+		),
+		of: UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- thisModule.resolveTemp(s.source.toResult, 'result'),
+			target <- i
+		)
+}
+
+rule AssertEquals extends OperationCallExp {
+	from
+		s: ATL!OperationCallExp (
+			s.operationName = 'assertEquals'
+		)
+	to
+		_: ATL!OperationCallExp,
+		t1: UML!CallBehaviorAction (
+			name <- 'assertEquals',
+			behavior <- thisModule.resolveTemp(ATL!Unit.allInstancesFrom('helpers') -> first(), 'ae'),
+			result <- result,
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			argument <- Sequence {t1a,t1b,t1c}
+		),
+		result: UML!OutputPin (
+			name <- 'result'
+		),
+		t1a: UML!InputPin (
+			name <- 'first',
+			upper <- -1,
+			lower <- 0
+		),
+		t1b: UML!InputPin (
+			name <- 'second',
+			upper <- -1,
+			lower <- 0
+		),
+		t1c: UML!InputPin (
+			name <- 'third'
+		),
+		ofa: UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- thisModule.resolveTemp(s.source.toResult, 'result'),
+			target <- t1a
+		),
+		ofb: UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- thisModule.resolveTemp(s.arguments->first().toResult, 'result'),
+			target <- t1b
+		),
+		ofc: UML!ObjectFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- vsar,
+			target <- t1c
+		),
+			vsa : UML!ValueSpecificationAction (
+				activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+				inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+				value <- vsav,
+				result <- vsar,
+				name <- '\'' + s.feature.name + '\''
+			),
+				vsav : UML!LiteralString (
+					value <- s.feature.name
+				),
+				vsar : UML!OutputPin
+}
+
+nodefault rule AssertEquals_FirstControlFlow {
+	from
+		s: ATL!OperationCallExp (
+			if s.operationName = 'assertEquals' then
+				not s.source.controlFlowSource.oclIsUndefined()
+			else
+				false
+			endif
+		)
+	  to
+		_: ATL!OperationCallExp,
+		cf : UML!ControlFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- thisModule.resolveTemp(s.source.controlFlowSource, 't1'),
+			target <- thisModule.resolveTemp(s, 't1')
+		)
+}
+
+nodefault rule AssertEquals_SecondControlFlow {
+	from
+		s: ATL!OperationCallExp (
+			if s.operationName = 'assertEquals' then
+				not s.arguments->first().controlFlowSource.oclIsUndefined()
+			else
+				false
+			endif
+		)
+	  to
+		_: ATL!OperationCallExp,
+		cf : UML!ControlFlow (
+			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
+			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
+			source <- thisModule.resolveTemp(s.arguments->first().controlFlowSource, 't1'),
+			target <- thisModule.resolveTemp(s, 't1')
+		)
+}
+
+-- rather than using a testing library (better, but for later), we insert the assert functions manually
+rule Unit2AssertFunctions {
+	from
+		s : ATL!Unit
+	to
+		_ : ATL!Unit,
+		ae : UML!FunctionBehavior (
+			name <- 'assertEquals',
+			ownedParameter <- Sequence {ae1, ae2, ae3, ae4}
+		),
+			ae1 : UML!Parameter (
+				direction <- #"in",
+				name <- 'first'
+			),
+			ae2 : UML!Parameter (
+				direction <- #"in",
+				name <- 'second'
+			),
+			ae3 : UML!Parameter (
+				direction <- #"in",
+				name <- 'third'
+			),
+			ae4 : UML!Parameter (
+				name <- 'result',
+				direction <- #return
+			)
+}
+-- @end Pseudo-OCL

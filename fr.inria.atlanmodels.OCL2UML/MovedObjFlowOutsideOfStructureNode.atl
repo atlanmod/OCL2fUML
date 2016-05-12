@@ -1,0 +1,76 @@
+-- @atlcompiler atl2010
+-- @nsURI UML=http://www.eclipse.org/uml2/4.0.0/UML
+-- @nsURI ATL=http://www.eclipse.org/gmt/2005/OCL
+-- @nsURI ALF=http://www.eclipse.org/gmt/4.0.0/UML
+
+
+module MovedObjFlowOutsideOfStructureNode;
+create OUT: UML refining IN: UML;
+
+helper context OclAny def: getInStructureNode : OclAny =
+	if (self.oclIsTypeOf(UML!OutputPin) or self.oclIsTypeOf(UML!InputPin)) then
+		self.refImmediateComposite().inStructuredNode
+	else
+		self.inStructuredNode
+	endif;
+
+rule addOuTputPinToStructureNodeForIfExp {
+	from
+		s: UML!ObjectFlow (
+			s.source.getInStructureNode <> s.target.getInStructureNode -- this condition is used to check if the object flow have the same source and tagert InstructureNode
+			and 
+			s.target.getInStructureNode.oclIsTypeOf(UML!StructuredActivityNode) -- this condition is used to verify that the InstructureNode of the object is a StructuredActivityNode and not an expansion region
+			and 
+			s.getInStructureNode=s.target.getInStructureNode -- this condition will be useful if we have a nested StructuredActivityNode
+		)
+	to
+		_: UML!ObjectFlow (
+			activity <- s.target.getInStructureNode.activity,
+			inStructuredNode <- s.target.getInStructureNode.inStructuredNode
+		)
+}
+
+rule AddPinForObjectFlowGoingIntoExpansionRegionBoundary {
+	from
+		s : UML!ObjectFlow (
+			s.source.getInStructureNode <> s.target.getInStructureNode and
+			s.target.getInStructureNode.oclIsKindOf(UML!ExpansionRegion) and
+			not (s.source.oclIsKindOf(UML!ExpansionNode) or s.target.oclIsKindOf(UML!ExpansionNode))
+		)
+	to
+		t : UML!ObjectFlow (
+			name <- 'OLD',
+			activity <- s.target.getInStructureNode.activity,
+			inStructuredNode <- s.target.getInStructureNode.inStructuredNode,
+			target <- p
+		),
+			p : UML!InputPin -> (s.target.getInStructureNode.structuredNodeInput),
+			of : UML!ObjectFlow (
+				name <- 'NEW',
+				source <- p,
+				target <- s.target,
+				activity <- s.target.getInStructureNode.activity,
+				inStructuredNode <- s.target.getInStructureNode
+			)
+}
+
+--rule AddControlFlowForInputExpansionNodeValues {
+--	from
+--		s : UML!ExpansionNode (
+--			not s.regionAsInput.oclIsUndefined()
+--		)
+--	to
+--		t : UML!ExpansionNode,
+--			cf : UML!ControlFlow (
+--				activity <- s.regionAsInput.activity,
+--				inStructuredNode <- s.regionAsInput.inStructuredNode,
+--				source <-
+--					let source : OclAny = s.incoming->first().source in
+--					if source.oclIsKindOf(UML!Pin) then
+--						source.refImmediateComposite()
+--					else
+--						source
+--					endif,
+--				target <- s.regionAsInput
+--			)
+--}

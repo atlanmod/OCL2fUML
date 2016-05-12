@@ -1,0 +1,472 @@
+library test_StringOperation;
+helper context X!Company def: Company_Factory(): String =
+	X!Company.newInstance().__classifierBehavior__();
+
+-- @begin paper examples
+----Listing 1.1:getCurrentSpouse operation 
+--precondition
+helper context X!Person def: getCurrentSpouse_precondition(): Boolean =
+	self.isMarried = true;
+--operation
+helper context X!Person def: getCurrentSpouse_body():  X!Person =
+	self.marriages -> select(m | m.ended = false).spouse;
+
+----Listing 1.2:Wives and husbands are adults
+--invariant
+helper context X!Person def: derivedFeature():  Boolean =
+	((self.wife -> notEmpty() implies self.wife.age >= 18) and (self.husband ->
+			notEmpty() implies self.husband.age >= 18));
+
+----Listing 1.3: Companies have more than 50 employees
+--invariant 
+helper context X!Company def: invariant(): Boolean =
+	self.employee.size() > 50 ;
+
+----Listing 1.4: birthDates derived attribute
+-- derived feature
+-- TYPE inference reports error because it does not convert EDate into OclAny
+helper context X!Company def: derivedFeature(): Collection(OclAny) =
+	self.employee -> collect(person | person.birthDate);
+-- @end  paper examples
+
+
+-- @begin OclAny Operations
+helper context X!Company def: test_oclIsKindOf1() : Boolean =
+	X!Company.newInstance().oclIsKindOf(X!Company).assertEquals(true);
+
+helper context X!Company def: test_oclIsKindOf2() : Boolean =
+	1.oclIsKindOf(Integer).assertEquals(true);
+
+helper context X!Company def: test_oclIsKindOf31() : Boolean =
+	1.oclIsKindOf(String).assertEquals(false);
+
+helper context X!Company def: test_oclIsKindOf32() : Boolean =
+	'1'.oclIsKindOf(String).assertEquals(true);
+
+helper context X!Company def: test_oclIsKindOf4() : Boolean =
+	1.oclIsKindOf(OclAny).assertEquals(true);
+
+helper context X!Company def: test_oclIsTypeOf1() : Boolean =
+	X!Company.newInstance().oclIsTypeOf(X!Company).assertEquals(true);
+
+helper context X!Company def: test_oclIsTypeOf2() : Boolean =
+	1.oclIsTypeOf(Integer).assertEquals(true);
+
+helper context X!Company def: test_oclIsTypeOf31() : Boolean =
+	1.oclIsTypeOf(String).assertEquals(false);
+
+helper context X!Company def: test_oclIsTypeOf32() : Boolean =
+	'1'.oclIsTypeOf(String).assertEquals(true);
+
+helper context X!Company def: test_oclIsTypeOf4() : Boolean =
+	1.oclIsTypeOf(OclAny).assertEquals(false);
+-- @end OclAny Operations
+
+-- @begin Integer Operations
+helper context X!Company def: test_plus(): Integer =
+	(3+5).assertEquals(8);
+
+helper context X!Company def: test_minus(): Integer =
+	(13-5).assertEquals(8);
+			
+helper context X!Company def: test_multiplicity(): Integer =
+	(3*5).assertEquals(15);
+			
+helper context X!Company def: test_divide(): Real =
+	(15/3).assertEquals(5);
+			
+helper context X!Company def: test_lower1(): Boolean =
+	(15<3).assertEquals(false);
+
+helper context X!Company def: test_lower2(): Boolean =
+	(3<15).assertEquals(true);
+			
+helper context X!Company def: test_upper1(): Boolean =
+	(15>3).assertEquals(true);
+
+helper context X!Company def: test_upper2(): Boolean =
+	(3>15).assertEquals(false);
+			
+helper context X!Company def: test_lowerOrEquals(): Boolean =
+	(15<=3).assertEquals(false);
+
+helper context X!Company def: test_upper(): Boolean =
+	(15>3).assertEquals(true);
+			
+helper context X!Company def: test_upperOrEquals(): Boolean =
+	(15>=15).assertEquals(true);
+
+helper context X!Company def: test_Integer_toString() : String =
+	1.toString().assertEquals('1');
+-- @end Integer Operations	
+
+
+-- @begin String Operations
+		
+helper context X!Company def: test_size(): Integer =
+	'ocl2fuml'.size().assertEquals(8);
+
+helper context X!Company def: test_concat(): String =
+	'ocl2'.concat('fuml').assertEquals('ocl2fuml');
+
+helper context X!Company def: test_substring(): String =
+	'ocl2fuml'.substring(3, 5).assertEquals('l2f');
+-- @end String Operations
+
+-- @begin Boolean Operations
+helper context X!Company def: test_and1(): Boolean =
+	(true and false).assertEquals(false);
+
+helper context X!Company def: test_and2(): Boolean =
+	(true and true).assertEquals(true);
+
+helper context X!Company def: test_and3(): Boolean =
+	(false and false).assertEquals(false);
+
+helper context X!Company def: test_or1(): Boolean =
+	(true or false).assertEquals(true);
+
+helper context X!Company def: test_or2(): Boolean =
+	(true or true).assertEquals(true);
+
+
+helper context X!Company def: test_or3(): Boolean =
+	(false or false).assertEquals(false);
+
+helper context X!Company def: test_implies1(): Boolean =
+	(true implies false).assertEquals(false);
+
+helper context X!Company def: test_implies2(): Boolean =
+	(false implies true).assertEquals(true);
+
+helper context X!Company def: test_implies3(): Boolean =
+	(false implies false).assertEquals(true);
+
+helper context X!Company def: test_implies4(): Boolean =
+	(true implies true).assertEquals(true);
+
+helper context X!Company def: test_implies5(): Boolean =
+	(false implies 'OclUndefined').assertEquals(true);
+
+helper context X!Company def: test_not1(): Boolean =
+	(not false).assertEquals(true);
+
+helper context X!Company def: test_not2(): Boolean =
+	(not true).assertEquals(false);
+
+-- @end Boolean Operations
+
+-- @begin Collection Operations
+helper context X!Company def: test_collectionSize1() : Integer =
+	Sequence {'abc'}->size().assertEquals(1);
+
+helper context X!Company def: test_collectionSize2() : Integer =
+	Sequence {true}->size().assertEquals(1);
+	
+helper context X!Company def: test_collectionSize3() : Integer =
+	Sequence {1}->size().assertEquals(1);
+	
+helper context X!Company def: test_collectionSize4() : Integer =
+	Sequence {'abc'}.excluding('abc').size().assertEquals(0);
+	
+helper context X!Company def: test_collectionSize5() : Integer =
+	Sequence {'abc','abc','abc','abc','abc'}->size().assertEquals(5);
+	
+helper context X!Company def: test_collectionSize6() : Integer =
+	Sequence {'abc', 1, true, 2}->size().assertEquals(4);
+	
+helper context X!Company def: test_includes1(): Boolean =
+	Sequence{'val1', 'val2', true, 3, 4 ,'val3'}->select(i | true)->includes(true).assertEquals(true);
+			
+helper context X!Company def: test_includes2(): Boolean =
+	Sequence{'val1', 'val2', true, 3, 4 ,'val3'}->select(i | true)->includes('valdd').assertEquals(false);
+
+helper context X!Company def: test_excludes1(): Boolean =
+	Sequence{'val1', 'val2', true, 3, 4 ,'val3'}->select(i | true)->excludes(true).assertEquals(false);
+			
+helper context X!Company def: test_excludes2(): Boolean =
+	Sequence{'val1', 'val2', true, 3, 4 ,'val3'}->select(i | true)->excludes('valdd').assertEquals(true);
+			
+helper context X!Company def: test_isEmpty1(): Boolean =
+	X!Person.allInstances().isEmpty().assertEquals(true);
+			
+helper context X!Company def: test_isEmpty2(): Boolean =
+	Sequence{'val1', 'val2', true, 3, 4 ,'val3'}->isEmpty().assertEquals(false);
+			
+helper context X!Company def: test_notEmpty1(): Boolean =
+	X!Person.allInstances().notEmpty().assertEquals(false);
+
+helper context X!Company def: test_notEmpty2(): Boolean =
+	Sequence{'val1', 'val2', true, 3, 4 ,'val3'}->notEmpty().assertEquals(true);
+
+helper context X!Company def: test_count1(): Integer =
+	Sequence{'val1', 'val2', 'val2', 'val3', 'val2'}->count('val2').assertEquals(3);
+
+helper context X!Company def: test_count2(): Integer =
+	Sequence{'val1', 'val2', 'val2', 'val3', 'val2'}->count('val4').assertEquals(0);
+	
+helper context X!Company def: test_including() : Sequence(Integer) =
+	Sequence {1, 2, 3}->including(4).assertEquals(Sequence {1, 2, 3, 4});
+
+helper context X!Company def: test_excluding() : Sequence(Integer) =
+	Sequence {1, 2, 3}->excluding(2).assertEquals(Sequence {1, 3});
+
+helper context X!Company def: test_first() : Integer =
+	Sequence {1, 2, 3}->first().assertEquals(1);
+
+helper context X!Company def: test_last() : Integer =
+	Sequence {1, 2, 3}->last().assertEquals(3);
+	
+helper context X!Company def: test_union(): Sequence(String) =
+	Sequence{'val1', 'val2', 'val2', 'val3', 'val2'}->union(Sequence{'val1', 'val2', 'val4'}).assertEquals(Sequence{'val1', 'val2', 'val2', 'val3', 'val2', 'val1', 'val2', 'val4'});
+
+	-- TODO the input of the intersection shoud be a 'Set' else the result may be false
+helper context X!Company def: test_intersection(): Sequence(String) =
+	Sequence{'val1', 'val2', 'val3', 'val4', 'val5'}->intersection(Sequence{'val1', 'val2', 'val4'}).assertEquals(Sequence{'val1','val2','val4'});
+	
+helper context X!Company def: test_includesAll(): Boolean =
+	Sequence{'val1', 'val2', 'val2', 'val3', 'val2'}->includesAll(Sequence{'val1', 'val2'}).assertEquals(true);
+
+helper context X!Company def: test_excludesAll(): Boolean =
+	Sequence{'val1', 'val2', 'val2', 'val3', 'val2'}->excludesAll(Sequence{'val1d', 'val2dd'}).assertEquals(false);
+	
+helper context X!Company def: test_at(): String =
+	Sequence{'val1', 'val2', 'val3', 'val4', 'val5'}->at(3).assertEquals('val3');
+
+helper context X!Company def: test_insertAt(): Sequence(String) =
+	Sequence{'val1', 'val2', 'val3', 'val4', 'val5'}->insertAt(3, 'testInsertAt3').assertEquals(Sequence{'val1', 'val2','testInsertAt3', 'val3', 'val4', 'val5'});
+
+helper context X!Company def: test_iterate() : String =
+	Sequence {'1', '2', '3'}->iterate(e; acc : String = '' |
+		if acc = '' then
+			''
+		else
+			acc.concat(', ')
+		endif.concat(e)
+	).assertEquals('1, 2, 3');
+
+helper context X!Company def: test_iterate2() : String =
+	let sep : String = ', ' in
+	Sequence {'1', '2', '3'}->iterate(e; acc : String = '' |
+		if acc = '' then
+			''
+		else
+			acc.concat(sep)
+		endif.concat(e)
+	).assertEquals('1, 2, 3');
+
+helper context X!Company def: test_iterate3() : String =
+	Sequence {'1', '2', '3'}->iterate(e; acc : String = 'Sequence: ' |
+		acc.concat(
+			if acc = 'Sequence: ' then
+				''
+			else
+				', '
+			endif
+		).concat(e)
+	).assertEquals('Sequence: 1, 2, 3');
+
+helper context X!Company def: test_iterate4() : String =
+	Sequence {1, 2, 3}->iterate(e; acc : String = '' |
+		if acc = '' then
+			''
+		else
+			acc.concat(', ')
+		endif.concat(e.toString())
+	).assertEquals('1, 2, 3');
+
+helper context X!Company def: test_SetSyntax() : Integer =
+	Set {1, 2, 3}->size().assertEquals(3);
+-- @end Collection Operations
+	
+-- @begin iterators 
+helper context X!Company def: test_any(): Integer =
+	Sequence{1,2,3,4,5,6,7,8}->any(i | (i>4) ).assertEquals(5);
+
+helper context X!Company def: test_select(): Sequence(Integer) =
+	Sequence{1,2,3,4,5,6,7,8}->select(i | (i<4) ).assertEquals(Sequence{1,2,3});
+
+helper context X!Company def: test_select2(): Sequence(Integer) =
+	Sequence{1,2,3,4,5,6,7,8}->select(i |
+--		i<>1 and i<>5 and i<>7
+		Sequence {1, 5, 7}->excludes(i)
+	).assertEquals(Sequence{2,3,4,6,8});
+
+helper context X!Company def: test_reject(): Sequence(Integer) =
+	Sequence{1,2,3,4,5,6,7,8}->reject(i | (i<4)).assertEquals(Sequence{4,5,6,7,8});
+
+helper context X!Company def: test_collect(): Sequence(Integer) =
+	Sequence{1,2,3,4,5,6,7,8}->collect(i | i).assertEquals(Sequence{1,2,3,4,5,6,7,8});
+
+-- TODO: fix this
+helper context X!Company def: test_nestedIterators(): Sequence(Integer) =
+	Sequence{1,2,3,4,5,6,7,8}->select(i |
+		Sequence {1, 5, 7}->select(e | e = i)->size() = 0
+	).assertEquals(Sequence{2,3,4,6,8});
+
+-- implicit conversion to Collection
+helper context X!Company def: test_iteratorOnNonCollection(): Sequence(Integer) =
+	let max : Integer = 4 in 
+	1->select(i | i < max).assertEquals(1);
+
+helper context X!Company def: test_iteratorVariableCapture(): Sequence(Integer) =
+	let max : Integer = 4 in 
+	Sequence{1,2,3,4,5,6,7,8}->select(i |
+		i < max
+	).assertEquals(Sequence{1,2,3});
+
+helper context X!Company def: operationContainingExpansionRegion1(s : Sequence(Integer), max : Integer) : Sequence(Integer) =
+	s->select(e | e < max);
+
+helper context X!Company def: test_callingOperationContainingExpansionRegion1() : Sequence(Integer) =
+	self.operationContainingExpansionRegion1(Sequence{1,2,3,4,5,6,7,8}, 4).assertEquals(Sequence{1,2,3});
+
+helper context X!Company def: operationContainingExpansionRegion2(max : Integer, s : Sequence(Integer)) : Sequence(Integer) =
+	s->select(e | e < max);
+
+helper context X!Company def: test_callingOperationContainingExpansionRegion2() : Sequence(Integer) =
+	self.operationContainingExpansionRegion2(4, Sequence{1,2,3,4,5,6,7,8}).assertEquals(Sequence{1,2,3});
+-- @end iterators
+
+
+-- TODO: actually, this should NOT work => implement assertNotEquals
+helper context X!Company def: test_nestedSequence() : Sequence(Integer) =
+	Sequence {1, Sequence {2, 3}}.assertEquals(Sequence {1, 2, 3});
+
+
+helper context X!Company def: test_letExp1() : Integer =
+	let x : Integer = 1 in
+	(x + x).assertEquals(2);
+
+helper context X!Company def: test_letExp2() : Integer =
+	let x : Integer = 1 in
+	if true then (x + x) else 'ERROR: unreachable code' endif.assertEquals(2);
+
+helper context X!Company def: test_letExp3() : Integer =
+	(let x : Integer = 1 in
+	x).assertEquals(1);
+
+helper context X!Company def: fact(n : Integer) : Integer =
+	if (n <= 1) then
+		1
+	else
+		n * self.fact(n - 1)
+	endif;
+
+helper context X!Company def: test_IfExp1(): Integer =
+	(if true then
+		1
+	else
+		2
+	endif).assertEquals(1);
+
+
+helper context X!Company def: test_IfExp2(): Integer =
+	(if false then
+		1
+	else
+		2
+	endif).assertEquals(2);
+
+helper context X!Company def: test_IfExp3(): Integer =
+	(if false then
+		1
+	else
+	    ((1+2 < 3*5)->select( i | true ))
+	endif).assertEquals(true);
+
+helper context X!Company def: test_nestedIfExp1(): Integer =
+	(if false then
+		if true then
+			1
+		else
+	   	 	2
+		endif
+	else
+	   if true then
+			3
+		else
+	   	 	4
+		endif
+	endif).assertEquals(3);
+
+
+helper context X!Company def: test_nestedIfExp2(): Integer =
+	(if false then
+			if true then
+			1
+			else
+		   	2
+			endif
+	else
+	   if true then
+			if false then
+			3
+			else
+	   	 	4
+			endif
+		else
+	   	 	5
+		endif
+	endif).assertEquals(4);
+
+helper context X!Company def: test_parameterPassing() : Integer =
+	self.fact(1).assertEquals(1);
+
+helper context X!Company def: test_recursion() : Integer =
+	self.fact(5).assertEquals(120);
+
+helper context X!Company def: test_IfExp_Sequence(): OclAny =
+	(if true then
+		Sequence{1,2,3}
+	else
+		2
+	endif).assertEquals(Sequence{1,2,3});
+
+helper context X!Company def: test_Select_sequence(): Sequence(Integer) =
+	Sequence{1,2,3,5}->select(i | Sequence{1,2,3,4,5,6,7}.includes(i)).assertEquals(Sequence{1,2,3,5});
+
+helper context X!Company def: __classifierBehavior__(): String =
+	self.test_iterate();
+
+
+helper context X!Company def: test_parameterPassing_select() : Sequence(Integer) =
+	self.select_Param(1).assertEquals(Sequence {1});
+
+
+helper context X!Company def: select_Param(n : Integer): Sequence(Integer) =
+	Sequence{1,2,3,5}->select(i | i=n);
+
+helper context X!Company def: test_Navigation1() : String =
+	X!Company.newInstance().refSetValue('name', 'test').name.assertEquals('test');
+
+helper context X!Person def: getName() : String =
+	self.firstName.concat(' ').concat(self.lastName);
+
+helper context X!Company def: test_callPersonOperation() : String =
+	X!Person.newInstance()
+		.refSetValue('firstName', 'First')
+		.refSetValue('lastName', 'Last')
+	.getName().assertEquals('First Last');
+
+helper context X!Company def: test_associationNavigation() : OclAny =
+	let m : X!Marriage = X!Marriages.newInstance() in
+	let p : X!Person =  X!Person.newInstance()
+		.refSetValue('marriages', m)
+	in
+	p.marriages.assertEquals(m);
+-- @end Navigation Tests... using pseudo-OCL for initialization
+
+-- @begin Pre-condition Tests
+helper context X!Person def: "body:getCurrentSpouse"() : X!Person =
+	self.marriages->select( m | m.ended = false ).spouse;
+
+helper context X!Person def: "pre:mustBeMarried:getCurrentSpouse"() : Boolean =
+	self.isMarried = true;
+
+helper context X!Person def: "inv:spouseIsOlderThan18"() : Boolean =
+  (self.wife->notEmpty() implies self.wife.age >= 18) and
+  (self.husband->notEmpty() implies self.husband.age >= 18);
+-- @end Pre-condition Tests
+
+	

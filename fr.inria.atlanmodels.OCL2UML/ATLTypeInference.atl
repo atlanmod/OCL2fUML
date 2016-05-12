@@ -1,0 +1,280 @@
+-- @nsURI ATL=http://www.eclipse.org/gmt/2005/OCL
+-- @nsURI UML=http://www.eclipse.org/uml2/5.0.0/UML
+library ATLTypeInference;
+
+helper context ATL!OclExpression def: inferredType : OclAny =
+	let t : String = self.oclType().name.debug('CANNOT infer type of') in
+	OclUndefined;
+
+helper context ATL!VariableExp def: inferredType : OclAny =
+	let var : ATL!VariableDeclaration = self.referredVariable in
+	if var.varName = 'self' then
+		self.feature.class
+	else if var.oclIsKindOf(ATL!Iterator) then
+		let sourceType : OclAny = var.loopExpr.sourceType in
+		if sourceType.oclIsUndefined() then
+			OclUndefined
+		else
+			sourceType.elementType
+		endif
+	else
+		var.type.toUML
+	endif endif;
+
+helper context ATL!LetExp def: inferredType : OclAny =
+	self.in_.inferredType;
+
+helper context ATL!IfExp def: inferredType : OclAny =
+	self.thenExpression.inferredType;
+
+helper context String def: primitiveType : UML!PrimitiveType =
+	UML!PrimitiveType.allInstancesFrom('UMLPrimitiveTypes')->any(e |
+		e.name = self
+	);
+
+helper context ATL!OclModelElement def: inferredType : OclAny =
+	UML!Classifier.allInstancesFrom('IN')->any(e |
+		e.name = self.name
+	);
+
+helper context ATL!IntegerExp def: inferredType : OclAny =
+	'Integer'.primitiveType;
+
+helper context ATL!BooleanExp def: inferredType : OclAny =
+	'Boolean'.primitiveType;
+
+helper context ATL!StringExp def: inferredType : OclAny =
+	'String'.primitiveType;
+
+helper context ATL!CollectionExp def: inferredType : OclAny =
+
+	Tuple {ttype = 'Collection', elementType =
+		self.elements->first().inferredType
+	};
+
+helper context UML!Behavior def: type : UML!Type =
+	let p : UML!Parameter = self.ownedParameter->any(e |
+								e.direction = #return
+							)
+	in
+	if p.oclIsUndefined() then
+		OclUndefined
+	else
+		p.type
+	endif;
+
+helper context ATL!IterateExp def: inferredType : OclAny =
+	self.result.type.toUML;
+
+helper context ATL!LoopExp def: sourceType : OclAny =
+	if self.source.inferredType.isCollection then
+		self.source.inferredType
+	else
+		Tuple {ttype = 'Collection', elementType = self.source.inferredType}
+	endif;
+
+
+helper context ATL!IteratorExp def: inferredType : OclAny =
+	if Set {'select', 'reject'}->includes(self.name) then
+		self.sourceType
+	else if 'collect' = self.name then
+		Tuple {ttype = 'Collection', elementType = self.body.inferredType}
+	else if 'any' = self.name then
+		self.sourceType.elementType
+	else
+		OclUndefined
+	endif endif endif;
+
+helper context UML!Type def: ttype : String = OclUndefined;
+
+helper context ATL!IntegerType def: toUML : OclAny =
+	'Integer'.primitiveType;
+
+helper context ATL!BooleanType def: toUML : OclAny =
+	'Boolean'.primitiveType;
+
+helper context ATL!RealType def: toUML : OclAny =
+	'Real'.primitiveType;
+
+helper context ATL!StringType def: toUML : OclAny =
+	'String'.primitiveType;
+
+helper context ATL!OclAnyType def: toUML : OclAny =
+	OclUndefined;	-- TODO
+
+helper context ATL!OclModelElement def: toUML : OclAny =
+	UML!Classifier.allInstancesFrom('IN') -> any(e |
+		e.name = self.name
+	);
+
+helper context ATL!CollectionType def: toUML : OclAny =
+	Tuple {ttype = 'Collection', elementType = self.elementType.toUML};
+
+
+helper context OclAny def: isCollection : Boolean =
+	if self.oclIsUndefined() then
+		false	
+	else
+		self.ttype = 'Collection'
+	endif;
+
+helper context ATL!OperationCallExp def: sourceType : OclAny =
+	self.source.inferredType;
+
+helper context ATL!CollectionOperationCallExp def: sourceType : OclAny =
+	if self.source.inferredType.isCollection then
+		self.source.inferredType
+	else
+		Tuple {ttype = 'Collection', elementType = self.source.inferredType}
+	endif;
+
+helper context ATL!OperationCallExp def: inferredType : OclAny =
+
+	let sourceType : OclAny = self.source.inferredType in
+	let name : String = self.operationName in
+
+	if Set {'assertEquals', 'debug', 'refSetValue'}->includes(name) then
+		self.sourceType
+	else if Set {'=', '<>', 'oclIsKindOf', 'oclIsTypeOf'}->includes(name) then
+		'Boolean'.primitiveType
+	else if 'allInstances' = name then
+		-- TODO: improve collection support
+		Tuple {ttype = 'Collection', elementType = self.source.toUML}
+	else if 'newInstance' = name then
+		self.source.toUML
+
+
+	else if Set {'Integer'.primitiveType, 'Boolean'.primitiveType, 'String'.primitiveType}->includes(self.sourceType) then
+--		let map : Map(String,String) =
+--			Map {
+--				('>', ''),
+--				('<', ''),
+--				('>=', ''),
+--				('<=', ''),
+--				('*', ''),
+--				('+', ''),
+--				('-', ''),
+--				('/', '')
+--			}
+--		in
+--		let opName : String =
+--			if map.get(name).oclIsUndefined() then
+--				name
+--			else
+--				map.get(name)
+--			endif
+--		in
+		FUML!Behavior.allInstancesFrom('lib') -> any(e |
+			e.name.toLower() = name.toLower()
+		).type
+	else if self.sourceType.oclIsUndefined() then
+		OclUndefined
+	else if self.sourceType.isCollection then
+		if Set {'including', 'excluding',
+					'union', 'intersection', 'insertAt'	-- TODO: commonSupertype
+				}->includes(name) then
+			self.sourceType
+		else if Set {'first', 'last', 'at'}->includes(name) then
+			self.sourceType.elementType
+		else
+			ALF!Behavior.allInstancesFrom('lib_ALF')->reject(e |
+				e.name.oclIsUndefined()
+			)->any(e |
+				e.name.toLower() = name.toLower()
+			).type
+		endif endif-- endif
+	else
+		let h : ATL!Operation = ATL!Operation.allInstancesFrom('helpers')->any(e |
+			e.name = name and
+			e.definition.context_.context_.toUML = self.sourceType
+		) in
+		if h.oclIsUndefined() then
+			OclUndefined
+		else
+			h.returnType.toUML
+		endif
+	endif endif endif endif endif endif endif;
+
+helper context UML!Class def: associations : OrderedSet(UML!Association) =
+	UML!Association.allInstancesFrom('IN')->select(e |
+		e.memberEnd->exists(p |
+			p.type = self
+		)
+	);
+
+helper context UML!Class def: navigableProperties : OrderedSet(UML!Property) =
+	self.ownedAttribute->union(
+		self.associations->collect(e |
+			e.memberEnd->select(p |
+				e.memberEnd->any(e | e <> p).type = self
+			)
+		)->flatten()
+	)->asOrderedSet();
+
+helper context ATL!NavigationOrAttributeCallExp def: inferredType : OclAny =
+	
+	if self.source.inferredType.oclIsUndefined() then
+		OclUndefined
+	else
+		let sourceType : OclAny =
+			if self.source.inferredType.isCollection then
+				self.source.inferredType.elementType
+			else
+				self.source.inferredType
+			endif
+		in
+		let property : UML!Property =
+			sourceType.navigableProperties->any(e |
+				e.name = self.name
+			)
+		in
+		if property.oclIsUndefined() then
+			OclUndefined.debug('warning: could not find property for: ' + self.name)
+		else if property.upper > 1 or property.upper < 0 then
+			Tuple {ttype = 'Collection', elementType = property.type}
+		else
+			if self.source.inferredType.isCollection then
+				Tuple {ttype = 'Collection', elementType = property.type}
+			else
+				property.type
+			endif
+		endif endif
+	endif;
+
+-- @begin Copied from Augment transformation
+helper context OclAny def: feature: OclAny =
+	if self.refImmediateComposite().oclIsKindOf(ATL!OclFeature) then
+		self.refImmediateComposite()
+	else
+		self.refImmediateComposite().feature
+	endif;
+
+helper context ATL!OclFeature def: typeName: String =
+	self.definition.context_.context_.name;
+
+helper context String def: class: UML!Class =
+	UML!Class.allInstancesFrom('IN') -> any(e | e.name = self);
+
+helper context ATL!OclFeature def: class: UML!Class =
+	self.typeName.class;
+-- @end Copied from Augment transformation
+
+helper context OclAny def: origin : String =
+	'';
+
+helper context UML!Element def: origin : String =
+	' from ' + self.eResource().toString();
+
+
+helper def: test : OclAny =
+	ATL!Operation.allInstances()->collect(e |
+		let actual : OclType = e.body.inferredType in
+		let expected : OclType = e.returnType.toUML in
+		if actual.oclIsUndefined() then
+			('expected: ' + expected.toString() + expected.origin).debug('warning: ' + e.class.name + '.' + e.name + '@' + e.location + ' returnType could not be computed')
+		else if actual <> expected then
+			('expected: ' + expected.toString() + expected.origin + ', actual: ' + actual.toString() + ' from ' + actual.origin).debug('error: ' + e.class.name + '.' + e.name + '@' + e.location + ' inconsistent returnType')
+		else
+			''
+		endif endif
+	);

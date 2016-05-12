@@ -1,0 +1,586 @@
+-- @name		PlantUML
+-- @version		1.0
+-- @authors		jouault
+-- @date		2013/03/26
+-- @description	${description}
+
+-- The different sections of a TCS model have been enclosed between BEGIN and END
+-- comments below. Additional information is provided below each BEGIN comment.
+-- The main sections of interest are "Class templates", and
+-- "Operator table" (the latter only for DSLs using operators).
+syntax PlantUML {
+
+-- BEGIN Primitive templates
+-- Specifies representation of primitive types.
+-- Only needs modification when default lexer is not satisfactory.
+-- Generally modified along with the lexer.
+	primitiveTemplate identifier for String default using NAME:
+		value = "%token%";
+
+	primitiveTemplate stringSymbol for String using STRING:
+		value = "ei.unescapeString(%token%, 1)",
+		serializer="'\'' + %value%.toCString() + '\''";
+
+	primitiveTemplate integerSymbol for Integer default using INT:
+		value = "Integer.valueOf(%token%)";
+
+	primitiveTemplate floatSymbol for Double default using FLOAT:
+		value = "Double.valueOf(%token%)";
+-- END Primitive templates
+
+-- BEGIN Class templates
+-- Specifies representation of classes.
+-- This is the main section to work on.
+	template Model main context
+		:	[ element ] {indentIncr = 0, nbNL = 2}
+		;
+
+	template Diagram abstract;
+
+	function diagramPre(Diagram)
+		:	"@startuml" (isDefined(name) ? name)
+			(isDefined(skinparams) ? <newline> skinparams)
+		;
+
+	function diagramPost(Diagram)
+		:	"@enduml"
+		;
+
+-- only used to inherit name attributes
+--	template NamedElement abstract;
+
+	template SkinParams
+		:	-- only used for commentsBefore (hack to insert arbitrary text)
+		;
+-- @begin Classes
+	template ClassDiagram context
+		:	$diagramPre
+			[ elements ]
+			$diagramPost
+		;
+
+	template ClassDiagramElement abstract;
+
+	template Package addToContext
+		:	"package"
+			(isDefined(longName) ?
+				longName{as = stringSymbol} "as"
+			) name
+			(isDefined(stereotype) ?
+				"<<" stereotype ">>"
+			)
+			"{" [
+				elements
+			] "}"
+		;
+
+	template Classifier abstract;
+
+	function classifierCommon(Classifier)
+		:
+			(isDefined(longName) ?
+				longName{as = stringSymbol} "as"
+			) name
+			(isDefined(stereotype) ?
+				"<<" stereotype ">>"
+			)
+			(isDefined(supertype) ?
+				"extends" supertype{refersTo = name}
+			)
+			(isDefined(features) ?
+				"{" [
+					features
+				] "}"
+			)
+		;
+
+	template Class addToContext
+		:	(isAbstract ? "abstract") "class"
+			$classifierCommon
+		;
+
+	template Interface addToContext
+		:	"interface" 
+			$classifierCommon
+		;
+
+	template Enumeration addToContext
+		:	"enum" 
+			$classifierCommon
+		;
+
+	template Feature abstract;
+
+	template Attribute
+		:	(visibility = #none ?
+				-- nothing
+			:
+				visibility
+			)
+			(isDefined(stereotype) ?
+				"<<" stereotype ">>"
+			)
+			name
+			(isDefined(type) ?
+				":" type{refersTo = longName}	-- TODO: or name?
+			)
+		;
+
+	enumerationTemplate VisibilityKind
+		:	#public		= "+",
+			#private	= "-",
+			#protected	= "#",
+			#package	= "~"
+		;
+
+	template Member
+		:	target{refersTo = name, autoCreate = ifmissing, createIn = '#context'.elements}
+		;
+
+	-- TODO: other direction for arrows
+	template Relation
+		:	members{separator =
+				(isDefined(leftLabel) ?
+					leftLabel{as = stringSymbol}
+				)
+				(isDotted ?
+					(kind = #normal ?
+						(isVertical ?
+							(isUnidirectional ?
+								"..>"
+							:
+								".."
+							)
+						:
+							(isUnidirectional ?
+								".>"
+							:
+								"."
+							)
+						)
+					:(kind = #aggregation ?
+						(isVertical ?
+							(isUnidirectional ?
+								"o..>"
+							:
+								"o.."
+							)
+						:
+							(isUnidirectional ?
+								"o.>"
+							:
+								"o."
+							)
+						)
+					:(kind = #composition ?
+						(isVertical ?
+							(isUnidirectional ?
+								"*..>"
+							:
+								"*.."
+							)
+						:
+							(isUnidirectional ?
+								"*.>"
+							:
+								"*."
+							)
+						)
+					:	-- kind = #extension
+						(isVertical ?
+							(isUnidirectional ?
+								"<|..>"
+							:
+								"<|.."
+							)
+						:
+							(isUnidirectional ?
+								"<|.>"
+							:
+								"<|."
+							)
+						)
+					)))
+				:
+					(kind = #normal ?
+						(isVertical ?
+							(isUnidirectional ?
+								"-->"
+							:
+								"--"
+							)
+						:
+							(isUnidirectional ?
+								"->"
+							:
+								"-"
+							)
+						)
+					:(kind = #aggregation ?
+						(isVertical ?
+							(isUnidirectional ?
+								"o-->"
+							:
+								"o--"
+							)
+						:
+							(isUnidirectional ?
+								"o->"
+							:
+								"o-"
+							)
+						)
+					:(kind = #composition ?
+						(isVertical ?
+							(isUnidirectional ?
+								"*-->"
+							:
+								"*--"
+							)
+						:
+							(isUnidirectional ?
+								"*->"
+							:
+								"*-"
+							)
+						)
+					:	-- kind = #extension
+						(isVertical ?
+							(isUnidirectional ?
+								"<|-->"
+							:
+								"<|--"
+							)
+						:
+							(isUnidirectional ?
+								"<|->"
+							:
+								"<|-"
+							)
+						)
+					)))
+				)
+				(isDefined(rightLabel) ?
+					rightLabel{as = stringSymbol}
+				)
+			}
+			(isDefined(name) ? ":" name)
+		;
+
+--	enumerationTemplate RelationKind
+--		:	#normal			= "--",
+--			#aggregation	= "o--",
+--			#composition	= "*--",
+--			#extension		= "<|--"
+--		;
+-- @end Classes
+
+
+-- @begin Objects
+	template ObjectDiagram context
+		:	$diagramPre
+			[ elements ]
+			$diagramPost
+		;
+
+	template ObjectDiagramElement abstract;
+
+	template Object
+		:	"object"
+			(isDefined(longName) ?
+				longName{as = stringSymbol} "as"
+			)
+			name
+			(isDefined(slots) ?
+				"{" [
+					slots
+				] "}"
+			)
+		;
+
+	template Slot
+		:	name "=" value
+		;
+-- @end Objects
+
+
+-- @begin Use Cases
+	template UseCaseDiagram context
+		:	$diagramPre
+			[ elements ]
+			$diagramPost
+		;
+
+	template UseCaseDiagramElement abstract;
+
+	template Rectangle
+		:	"rectangle"
+			(isDefined(longName) ?
+				longName{as = stringSymbol} "as"
+			)
+			name
+			(isDefined(elements) ?
+				"{" [
+					elements
+				] "}"
+			)
+		;
+-- @end Use Cases
+
+
+-- @begin State machines
+	template StateDiagram context
+		:	$diagramPre
+			region
+			$diagramPost
+		;
+
+	template StateMachineElement abstract;
+
+	template State addToContext
+		:	"state" (isDefined(longName) ?
+				longName{as = stringSymbol} "as"
+			) name
+			(isDefined(kind) ?
+				"<<" kind ">>"
+			)
+			(isDashed ?
+				"##[dashed]"
+			)
+			(isDefined(regions) ?
+				"{" [
+					regions{separator = "--", forcedLower = 1}
+				] "}"
+			)
+		;
+
+	template Region
+		:	[ elements ]
+		;
+
+	template Transition abstract;
+
+	-- TODO: find a way to have on transitionCommon function with mandatory or optional colon
+	function transitionCommon(Transition)
+		:
+			(isDefined(trigger) ?
+				":" trigger{separator = ",", forcedLower = 1}
+				(isDefined(guard) ?
+					"[" guard "]"
+				)
+				(isDefined(effect) ?
+					"/" effect
+				)
+			:(isDefined(guard) ?
+				":" "[" guard "]"
+				(isDefined(effect) ?
+					"/" effect
+				)
+			:(isDefined(effect) ?
+				":" "/" effect
+			)))
+		;
+
+	function transitionCommonWithMandatoryColon(Transition)
+		:	":" trigger{separator = ","}
+			(isDefined(guard) ?
+				"[" guard "]"
+			)
+			(isDefined(effect) ?
+				"/" effect
+			)
+		;
+
+	template Trigger
+		:	parts
+		;
+
+	template ExternalTransition
+		:	source{refersTo = name, autoCreate = ifmissing, createIn = '#context'.elements}
+			(isDefined(color) ?
+				(isVertical ? "-[#" <no_space> color <no_space> "]->" : "-[#" <no_space> color <no_space> "]>")	-- nospace inside []
+			:
+				(isVertical ? "-->" : "->")
+			)
+			target{refersTo = name, autoCreate = ifmissing, createIn = '#context'.elements}
+			$transitionCommon
+		;
+
+	template InternalTransition
+		:	state{refersTo = name, autoCreate = ifmissing, createIn = '#context'.elements}
+			$transitionCommonWithMandatoryColon
+			-- serialize an empty hyperlink at the end (see http://plantuml.sourceforge.net/qa/?qa=2240/last-hyperlink-dropped)
+			"[[" "]]"
+		;
+-- @end State machines
+-- END Class templates
+
+-- BEGIN Special symbols
+-- Possible modifications:
+--	- Addition of new symbols.
+--	- Modification of spaces information.
+--	- Removal of unused symbols so that using these symbols results in lexical
+--	error rather than parsing error.
+	symbols {
+		-- no space inside of stereotype, otherwise does not work properly (at least for <<choice>>)
+		stereol		= "<<"	: rightNone;
+		stereor		= ">>"	: leftNone;
+
+		lsquare		= "[";
+		rsquare		= "]"	: rightSpace;
+		excl		= "!";
+		coma		= ","	: leftNone, rightSpace;
+		lparen		= "(";
+		rparen		= ")"	: leftNone, rightSpace;
+		lcurly		= "{"	: leftSpace;
+		rcurly		= "}"	: leftNone, rightSpace;
+		semi		= ";"	: leftNone, rightSpace;
+		colon		= ":"	: leftSpace, rightSpace;
+		pipe		= "|"	: leftSpace, rightSpace;
+		sharp		= "#"	: leftSpace;
+		qmark		= "?";
+		coloncolon	= "::"	: leftNone, rightNone;
+
+		-- operator symbols
+		point		= "."	: leftNone;
+		rarrow		= "->"	: leftNone;
+		minus		= "-"	: leftSpace, rightSpace;
+		star		= "*"	: leftSpace, rightSpace;
+		slash		= "/"	: leftSpace, rightSpace;
+		plus		= "+"	: leftSpace, rightSpace;
+		eq			= "="	: leftSpace, rightSpace;
+		gt			= ">"	: leftSpace, rightSpace;
+		lt			= "<"	: leftSpace, rightSpace;
+		ge			= ">="	: leftSpace, rightSpace;
+		le			= "<="	: leftSpace, rightSpace;
+		ne			= "<>"	: leftSpace, rightSpace;
+		larrow		= "<-"	: leftSpace, rightSpace;
+
+		ltlt		= "<<"	: leftSpace;
+		gtgt		= ">>"	: rightSpace;
+	}
+-- END Special symbols
+
+-- BEGIN Operator table
+-- Defines all operators with their priority, arity, and associativity.
+-- All defined operators must be used in operator templates.
+
+-- Specify operator table(s) here if necessary.
+
+-- END Operator table
+
+
+-- BEGIN Lexer
+-- Specifies the lexical entities.
+-- Only needs modification when default lexer is not satisfactory.
+-- Generally modified along with Primitive templates.
+	token COMMENT	: endOfLine(start = "'");
+	token STRING	: multiLine(start = "\"", end = "\"", esc = "\\");
+
+	lexer = "
+%options testLiterals = false;
+
+NL
+	:	(	'\\r' '\\n'
+		|	'\\n' '\\r'	//Improbable
+		|	'\\r'
+		|	'\\n'
+		)
+	{newline();}
+	;
+
+WS
+	:	(	' '
+		|	'\\t'
+		)
+	;
+
+%protected
+DIGIT
+	:	'0'..'9'
+	;
+
+%protected
+ALPHA
+	:	'a'..'z'
+	|	'A'..'Z'
+	|	'_'
+	//For Unicode compatibility (from 0000 to 00ff)
+	|	'\\u00C0' .. '\\u00D6'
+	|	'\\u00D8' .. '\\u00F6'
+	|	'\\u00F8' .. '\\u00FF'
+	;
+
+%protected
+SNAME
+%v2	options {
+%v2		testLiterals = true;
+%v2	}
+	:	(ALPHA) (ALPHA | DIGIT)*
+;
+
+NAME
+	:	(
+			'[' '*' ']'
+		|
+%v3			SNAME
+%v2			s:SNAME {if(s.getType() != SNAME) $setType(s.getType());}
+		)
+	;
+
+INT
+	:	(DIGIT)+
+%v2		(('.' DIGIT)=> '.' (DIGIT)+ {$setType(FLOAT);})?
+	;
+
+%v3	FLOAT	:	DIGIT+ '.' DIGIT*	;
+
+%protected
+ESC
+	:	'\\\\'!
+		(	'n' %v2{%setText(\"\\n\");}
+		|	'r' %v2{%setText(\"\\r\");}
+		|	't' %v2{%setText(\"\\t\");}
+		|	'b' %v2{%setText(\"\\b\");}
+		|	'f' %v2{%setText(\"\\f\");}
+		|	'\"' %v2{%setText(\"\\\"\");}
+		|	'\\'' %v2{%setText(\"\\'\");}
+		|	'\\\\' %v2{%setText(\"\\\\\");}
+		|	(
+				('0'..'3')
+				(
+%v2					options {
+%v2						warnWhenFollowAmbig = false;
+%v2					}
+				:	('0'..'7')
+					(
+%v2						options {
+%v2							warnWhenFollowAmbig = false;
+%v2						}
+					:	'0'..'7'
+					)?
+				)?
+			|	('4'..'7')
+				(
+%v2					options {
+%v2						warnWhenFollowAmbig = false;
+%v2					}
+				:	('0'..'7')
+				)?
+			)
+				{
+%v2					String s = %getText;
+%v2					int i;
+%v2					int ret = 0;
+%v2					String ans;
+%v2					for (i=0; i<s.length(); ++i)
+%v2						ret = ret*8 + s.charAt(i) - '0';
+%v2					ans = String.valueOf((char) ret);
+%v2					%setText(ans);
+				}
+		)
+	;
+	";
+-- END Lexer
+
+}
