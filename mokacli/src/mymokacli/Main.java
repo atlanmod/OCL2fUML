@@ -179,7 +179,7 @@ public class Main {
 	}
 
 	public static int asserts = 0;
-	// TODO: make sure an assert operation (e.g., assertEquals)
+	// DONE: make sure an assert operation (e.g., assertEquals)
 	// is at least called once (in case bad compilation fails to
 	// generate code that calls it)
 	@Test

@@ -220,7 +220,7 @@ helper context X!Company def: test_last() : Integer =
 helper context X!Company def: test_union(): Sequence(String) =
 	Sequence{'val1', 'val2', 'val2', 'val3', 'val2'}->union(Sequence{'val1', 'val2', 'val4'}).assertEquals(Sequence{'val1', 'val2', 'val2', 'val3', 'val2', 'val1', 'val2', 'val4'});
 
-	-- TODO the input of the intersection shoud be a 'Set' else the result may be false
+	
 helper context X!Company def: test_intersection(): Sequence(String) =
 	Sequence{'val1', 'val2', 'val3', 'val4', 'val5'}->intersection(Sequence{'val1', 'val2', 'val4'}).assertEquals(Sequence{'val1','val2','val4'});
 	
@@ -298,7 +298,6 @@ helper context X!Company def: test_reject(): Sequence(Integer) =
 helper context X!Company def: test_collect(): Sequence(Integer) =
 	Sequence{1,2,3,4,5,6,7,8}->collect(i | i).assertEquals(Sequence{1,2,3,4,5,6,7,8});
 
--- TODO: fix this
 helper context X!Company def: test_nestedIterators(): Sequence(Integer) =
 	Sequence{1,2,3,4,5,6,7,8}->select(i |
 		Sequence {1, 5, 7}->select(e | e = i)->size() = 0
@@ -329,7 +328,7 @@ helper context X!Company def: test_callingOperationContainingExpansionRegion2() 
 -- @end iterators
 
 
--- TODO: actually, this should NOT work => implement assertNotEquals
+
 helper context X!Company def: test_nestedSequence() : Sequence(Integer) =
 	Sequence {1, Sequence {2, 3}}.assertEquals(Sequence {1, 2, 3});
 
@@ -437,6 +436,7 @@ helper context X!Company def: test_parameterPassing_select() : Sequence(Integer)
 helper context X!Company def: select_Param(n : Integer): Sequence(Integer) =
 	Sequence{1,2,3,5}->select(i | i=n);
 
+-- @begin Navigation Tests
 helper context X!Company def: test_Navigation1() : String =
 	X!Company.newInstance().refSetValue('name', 'test').name.assertEquals('test');
 

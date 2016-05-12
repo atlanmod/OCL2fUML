@@ -7,10 +7,6 @@
 module AugmentUMLModelWithATLHelpers;
 create OUT: UML refining IN: UML, helpers: ATL, lib: FUML, lib_ALF: FUML, UMLPrimitiveTypes : UML;
 
--- FUML = UML but with different names to fool ATL, otherwise refining lib into OUT
-		-- messes everything up
-
-
 helper context ATL!OclFeature def: typeName: String =
 	self.definition.context_.context_.name;
 
@@ -526,24 +522,17 @@ rule NavigationOrAttribussteCallExp2ReadStructuralFeatureAction {
 			name <- 'Read_' + s.name,
 			result <- result,
 			object <- t1b,
-			--			structuralFeature <- s.feature.class.allAttributes() -> any(a |
--- a.name = s.
---					name),
---			structuralFeature <- s.feature.class.allAttributes() -> any(a | a.name = s.
---				name),
--- TODO: we assumed that properties having different names.
+	
 			structuralFeature <- UML!Property.allInstances() -> any(a | a.name = s.name),
 			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
 			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo)
 		),
 		result: UML!OutputPin (
-			name <- 'result' --			lower <- 0,
---			-- lowerBound in xMOF
---			upper <- -1 -- upperBound in xMOF
+			name <- 'result' 
 		),
 		t1b: UML!InputPin (
 			type <- s.feature.class,
-			name <- 'object' --			lower <- 1,			upper <- 1
+			name <- 'object' 
 		),
 		t2: UML!ObjectFlow (
 			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
@@ -572,12 +561,12 @@ rule OperationCallExp_allInstances2ReadExtentAction extends OperationCallExp {
 			result <- result,
 			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
 			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
-			classifier <- s.source.name.class -- source must be an OclModelElement
+			classifier <- s.source.name.class
 		),
 		result: UML!OutputPin (
 			name <- 'result',
-			lower <- 0,	-- lowerBound in xMOF
-			upper <- -1	-- upperBound in xMOF
+			lower <- 0,	
+			upper <- -1	
 			
 		)
 }
@@ -591,7 +580,6 @@ rule OperationCallExp_Debug2CallBehaviorAction extends OperationCallExp {
 		_: ATL!OperationCallExp,
 		t1: UML!CallBehaviorAction (
 			name <- 'WriteLine(...)',
-			-- TODO: improve this in case the library changes?
 			behavior <- FUML!Behavior.allInstancesFrom('lib')->any(e |
 							e.name = 'WriteLine'
 						),
@@ -610,11 +598,11 @@ rule OperationCallExp_Debug2CallBehaviorAction extends OperationCallExp {
 			
 		),
 		t1b: UML!InputPin (
-			name <- 'list' --				, lower <- 1, upper <- -1
+			name <- 'list' 
 			
 		),
 		t2: UML!ObjectFlow (
-			name <- 'probl TODO',
+
 			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
 			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
 			source <- thisModule.resolveTemp(s.source.toResult, 'result'),
@@ -695,19 +683,15 @@ helper context ATL!OperationCallExp def: transformGenerically : Boolean =
 
 helper context ATL!OperationCallExp def: target : ATL!Operation =
 	ATL!Operation.allInstancesFrom('helpers') -> any(o |
-		-- until we have full type
-		-- inference, we assume the type is the contextual Class, and the
-		-- operation is defined in ATL, not in UML
---		o.typeName = self.feature.typeName
+		
 		o.class = self.source.inferredType
 
 		and o.name = self.operationName
 	);
-					-- TODO: use getOperation(String name, parameters...) to
-					-- leverage type signature for UML operations
+					
 
 helper context ATL!"OclType" def: lower : Integer =
-	1;	-- TODO: use 0 here because any value can be OclUndefined/null?
+	1;	
 
 helper context ATL!"OclType" def: upper : Integer =
 	1;
@@ -735,7 +719,7 @@ rule OperationCallExp_Helper2CallOperationAction extends OperationCallExp {
 
 							 thisModule.resolveTemp(UML!Operation.allInstancesFrom('IN')->any(var | s.operationName.endsWith(var.name)), 'wrapperOp')
 						endif,		
---				thisModule.resolveTemp(s.target, 't1'),
+
 			result <- result,
 			argument <- s.target.parameters->collect(p |
 							thisModule.resolveTemp(Tuple {s = s, p = p}, 't') ),
@@ -749,7 +733,7 @@ rule OperationCallExp_Helper2CallOperationAction extends OperationCallExp {
 			upper <- s.target.returnType.upper
 		),
 		t1b: UML!InputPin (
-			name <- 'target' --,			lower <- 1,			upper <- -1... TODO: can we have a helper on a Collection?
+			name <- 'target' 
 			
 		),
 		t2: UML!ObjectFlow (
@@ -821,7 +805,7 @@ rule HelperArgument_WithControlFlow extends HelperArgument {
 helper context String def: firstToUpper : String =
 	self.substring(1, 1).toUpper() + self.substring(2, self.size());
 
--- TODO: rename into targetBehavior
+
 helper context ATL!OperationCallExp def: targetOperation : UML!Behavior =
 	if self.toFUMLBehaviorCall then
 		FUML!Behavior.allInstancesFrom('lib') -> any(e |
@@ -834,15 +818,10 @@ helper context ATL!OperationCallExp def: targetOperation : UML!Behavior =
 			e.parameters->notEmpty()
 		)->any(e |
 			e.name = self.operationName.firstToUpper
---			and
---			if self.source.inferredType.isCollection then
---				e.parameters->first().upper = -1
---			else
---				e.parameters->first().upper = 1
---			endif
-		)--.debug('target for ' + self.operationName)
+	
+		)
 	else
-		OclUndefined	-- TODO: UML!Operations predefined in input model
+		OclUndefined	
 	endif endif;
 
 helper context ATL!OperationCallExp def: toBehaviorCall : Boolean =
@@ -934,7 +913,7 @@ rule OperationCallExp2LibraryBehaviorCall extends OperationCallExp {
 								p.direction = #return
 							)->collect(p |
 								thisModule.resolveTemp(Tuple {s = s, p = p}, 't')
-							)--.debug('resolved params for ' + s.operationName)
+							)
 						)
 		),
 		result: UML!OutputPin (
@@ -1016,7 +995,6 @@ rule OperationCallExp_Boolean_Implies2CallOperationAction extends
 			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo)
 		),
 		decNode: UML!DecisionNode (
---			decisionInputFlow <- fork2decNod,
 			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
 			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo)
 		),
@@ -1086,7 +1064,6 @@ rule OperationCallExp_Boolean_Implies2CallOperationAction extends
 			source <- thisModule.resolveTemp(s.arguments.first().toResult, 'result'),
 			target <- t1b
 		),
--- ControlFlow source
 		t1 : UML!MergeNode (
 			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
 			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo)
@@ -1109,7 +1086,7 @@ rule OperationCallExp_Boolean_Integer_toString2CallOperationAction extends
 		OperationCallExp {
 	from
 		s: ATL!OperationCallExp (
-			s.operationName = 'toString' -- used for boolean and integer types
+			s.operationName = 'toString' 
 		
 		)
 	  to
@@ -1213,8 +1190,6 @@ rule IntegerExp2ValueSpecificationAction {
 }
 
 
--- TODO: not in some cases like first argument of refSetValue?
--- but only a problem if we actually use pseudo-OCL
 rule StringExp2ValueSpecificationAction {
 	from
 		s: ATL!StringExp
@@ -1551,7 +1526,7 @@ rule IterateExp2ReduceAction {
 					activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
 					inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo)
 				),
-				sofInit : UML!ObjectFlow (	-- sofInit must come before sofSource for ordered input... it may be better to initialize the opposite to avoid this orderding constraint
+				sofInit : UML!ObjectFlow (	
 					activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
 					inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
 					source <- thisModule.resolveTemp(s.result.initExpression.toResult, 'result'),
@@ -1576,7 +1551,7 @@ rule IterateExp2ReduceAction {
 				name <- 'IterateExp_body',
 				ownedParameter <- OrderedSet {
 									s.result,
-									s.iterators->first()	-- only works with a single iterator
+									s.iterators->first()	
 								}->collect(p |
 									thisModule.resolveTemp(p, 'actP')
 								)->append(actRet),
@@ -1621,7 +1596,6 @@ rule IterateIterator2Parameter extends VariableDeclaration2ForkNode {
 		),
 		of : UML!ObjectFlow (
 			activity <- thisModule.resolveTemp(s.loopExpr, 'activity'),
---TODO?			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
 			source <- actPN,
 			target <- result
 		)
@@ -1646,7 +1620,6 @@ rule IterateAccumulator2Parameter extends VariableDeclaration2ForkNode {
 		),
 		of : UML!ObjectFlow (
 			activity <- thisModule.resolveTemp(s.baseExp, 'activity'),
---TODO?			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
 			source <- actPN,
 			target <- result
 		)
@@ -1672,20 +1645,13 @@ rule Iterator2fork_and_objectFlow extends VariableDeclaration2ForkNode {
 		)
 }
 
--- rename target element to t1: newInstance, refDestroy
 
--- IterateExp
--- NavigationOrAttributeCallExp
--- LiteralExp
--- IteratorExp
 helper context ATL!OclExpression def: controlFlowSource : ATL!OclExpression =
 	self;
 
--- DONE: possible problems: implies, toString
--- TODO: <>: callNot should be t1 (because it is the last action)?
 helper context ATL!OperationCallExp def: controlFlowSource : ATL!OclExpression =
 	if self.operationName = 'debug' then
-		self.source.controlFlowSource	-- if we wanted to make sure the WriteLine to happen first, we would need to put it in an ExpansionRegion and make control flow pass "through" it
+		self.source.controlFlowSource	
 	else
 		self
 	endif;
@@ -1696,7 +1662,7 @@ helper context ATL!VariableExp def: controlFlowSource : ATL!OclExpression =
 		self
 	else if not var.letExp.oclIsUndefined() then
 		var.initExpression.controlFlowSource
-	else	-- Parameter, Iterator or Iterate.result
+	else	
 		OclUndefined
 	endif endif;
 
@@ -1742,9 +1708,7 @@ rule CollectionExp2JoinNode {
 		)
 }
 
--- DONE: add ControlFlows between elements for Sequence & OrderedSet
--- to preserve ordering... and maybe even for Set & Bag because we would
--- need to know which element is the last for ControlFlow to ExpansionRegion
+
 rule CollectionElement {
 	from
 		c: ATL!CollectionExp,
@@ -1894,7 +1858,6 @@ helper context ATL!RealType def: typeName : String =
 helper context ATL!StringType def: typeName : String =
 	'String';
 
--- only if operationName = oclIs{Kind,Type}Of
 helper context ATL!OperationCallExp def: type : OclType =
 	self.arguments->first();
 
@@ -2036,7 +1999,7 @@ rule IfExp2objectFlow_controlFlow_decisionNode_fork {
 			target <- result,
 			source <- thisModule.resolveTemp(s.elseExpression.toResult, 'result')
 		),
--- for ControlFlow
+
 			t1 : UML!MergeNode (
 				activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
 				inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo)
@@ -2235,7 +2198,6 @@ rule operationInClassWithInvariant2Wrap extends OperationToWrap{
 		),
 		
 	callOp2 : UML!CallOperationAction(
-			name <- 'todo' ,
 			activity <- thisModule.resolveTemp(s, 'wrapperAct'),		
 			inStructuredNode <- thisModule.resolveTemp(s, 'strucNodePre'),
 			operation <- thisModule.resolveTemp( s.class, 'allinvOp'),
@@ -2348,7 +2310,6 @@ rule operationInClassWithInvariant2Wrap extends OperationToWrap{
 		),
 		
 	callOp2a : UML!CallOperationAction(
-			name <- 'todo' ,
 			activity <- thisModule.resolveTemp(s, 'wrapperAct'),		
 			inStructuredNode <- thisModule.resolveTemp(s, 'strucNodePost'),
 			operation <- thisModule.resolveTemp( s.class, 'allinvOp'),
@@ -2538,11 +2499,9 @@ rule ClassifierBehavior extends Operation2Operation {
 	to
 		_: ATL!Operation,
 		activity : UML!Activity -> (s.class.refSetValue('isActive',
-				true).classifierBehavior) -- we allow ourselves to use refSetValue
-				-- because we are in Pseudo-OCL anyway
+				true).classifierBehavior)
 	  }
 
--- TODO: value.{lower=0,upper=-1} + ControlFlow?
 rule OperationCallExp_refSetValue2AddStructuralFeatureValueAction extends
 		OperationCallExp {
 	from
@@ -2553,13 +2512,9 @@ rule OperationCallExp_refSetValue2AddStructuralFeatureValueAction extends
 		_ : ATL!OperationCallExp,
 		t1 : UML!AddStructuralFeatureValueAction (
 			name <- 'AddStructuralFeatureValue' + ' refSetValue',
-			--we assumed that properties having different names.
 			structuralFeature <-	UML!Property.allInstances()->any(a |
 										a.name = s.arguments->first().stringSymbol
 				 					),
---						-- until we have full type inference, we assume the type is the
---						-- contextual Class
---						type.getAllAttributes() -> any(a | a.name = featureName),
 			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
 			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode.target, s.inStructuredNode.resolveTo),
 			object <- object,
@@ -2568,35 +2523,13 @@ rule OperationCallExp_refSetValue2AddStructuralFeatureValueAction extends
 		),
 		object: UML!InputPin (
 			name <- 'object' 
---			lower <- 1,upper <- 1
---			,
---			type <- let featureName: String =
---					s.arguments -> first().stringSymbol
---				in
---					s.feature.class
+
 		),
 		value: UML!InputPin (
 			name <- 'value' 
---			lower <- 1, upper <- 1,
---			type <- let featureName: String =
---					s.arguments -> first().stringSymbol
---				in
---					-- first argument MUST be a StringExp
---					let type: UML!Class =
---						s.feature.class
---					in
---						-- until we have full type inference, we assume the type is the
---								-- contextual Class
---						type.getAllAttributes() -> any(a | a.name = featureName).type
+		
 		),
 		result: UML!OutputPin (
-			name <- 'result' 
---			lower <- 1,			upper <- 1
---			,
---			type <- let featureName: String =
---					s.arguments -> first().stringSymbol
---				in
---					s.feature.class
 		),
 		of1: UML!ObjectFlow (
 			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
@@ -2624,7 +2557,7 @@ rule OperationCallExp2CreateObjectAction extends OperationCallExp {
 			classifier <- let classifierName: String =
 					s.source.name
 				in
-					-- source argument MUST be an OclModelElement
+					
 					UML!Classifier.allInstancesFrom('IN') -> any(e | e.name =
 							classifierName),
 			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
@@ -2648,9 +2581,7 @@ rule OperationCallExp2DestroyObjectAction extends OperationCallExp {
 		t1 : UML!DestroyObjectAction (
 			name <- 'Destroy',
 			target <- i,
-			-- WARNING: activity & inStructuredNode are containments
-			-- therefore inStructuredNode may perform some child-stealing, and must
-			-- appear after in the transformation (TODO: find a better solution)
+			
 			activity <- thisModule.resolveTemp(s.toActivity, 'activity'),
 			inStructuredNode <- thisModule.resolveTemp(s.inStructuredNode, 't1')
 		),
@@ -2767,7 +2698,6 @@ nodefault rule AssertEquals_SecondControlFlow {
 		)
 }
 
--- rather than using a testing library (better, but for later), we insert the assert functions manually
 rule Unit2AssertFunctions {
 	from
 		s : ATL!Unit

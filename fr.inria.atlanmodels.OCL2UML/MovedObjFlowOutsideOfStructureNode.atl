@@ -17,11 +17,11 @@ helper context OclAny def: getInStructureNode : OclAny =
 rule addOuTputPinToStructureNodeForIfExp {
 	from
 		s: UML!ObjectFlow (
-			s.source.getInStructureNode <> s.target.getInStructureNode -- this condition is used to check if the object flow have the same source and tagert InstructureNode
+			s.source.getInStructureNode <> s.target.getInStructureNode 
 			and 
-			s.target.getInStructureNode.oclIsTypeOf(UML!StructuredActivityNode) -- this condition is used to verify that the InstructureNode of the object is a StructuredActivityNode and not an expansion region
+			s.target.getInStructureNode.oclIsTypeOf(UML!StructuredActivityNode) 
 			and 
-			s.getInStructureNode=s.target.getInStructureNode -- this condition will be useful if we have a nested StructuredActivityNode
+			s.getInStructureNode=s.target.getInStructureNode
 		)
 	to
 		_: UML!ObjectFlow (
@@ -54,23 +54,3 @@ rule AddPinForObjectFlowGoingIntoExpansionRegionBoundary {
 			)
 }
 
---rule AddControlFlowForInputExpansionNodeValues {
---	from
---		s : UML!ExpansionNode (
---			not s.regionAsInput.oclIsUndefined()
---		)
---	to
---		t : UML!ExpansionNode,
---			cf : UML!ControlFlow (
---				activity <- s.regionAsInput.activity,
---				inStructuredNode <- s.regionAsInput.inStructuredNode,
---				source <-
---					let source : OclAny = s.incoming->first().source in
---					if source.oclIsKindOf(UML!Pin) then
---						source.refImmediateComposite()
---					else
---						source
---					endif,
---				target <- s.regionAsInput
---			)
---}

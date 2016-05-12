@@ -100,7 +100,7 @@ helper context ATL!StringType def: toUML : OclAny =
 	'String'.primitiveType;
 
 helper context ATL!OclAnyType def: toUML : OclAny =
-	OclUndefined;	-- TODO
+	OclUndefined;	
 
 helper context ATL!OclModelElement def: toUML : OclAny =
 	UML!Classifier.allInstancesFrom('IN') -> any(e |
@@ -138,32 +138,14 @@ helper context ATL!OperationCallExp def: inferredType : OclAny =
 	else if Set {'=', '<>', 'oclIsKindOf', 'oclIsTypeOf'}->includes(name) then
 		'Boolean'.primitiveType
 	else if 'allInstances' = name then
-		-- TODO: improve collection support
+
 		Tuple {ttype = 'Collection', elementType = self.source.toUML}
 	else if 'newInstance' = name then
 		self.source.toUML
 
 
 	else if Set {'Integer'.primitiveType, 'Boolean'.primitiveType, 'String'.primitiveType}->includes(self.sourceType) then
---		let map : Map(String,String) =
---			Map {
---				('>', ''),
---				('<', ''),
---				('>=', ''),
---				('<=', ''),
---				('*', ''),
---				('+', ''),
---				('-', ''),
---				('/', '')
---			}
---		in
---		let opName : String =
---			if map.get(name).oclIsUndefined() then
---				name
---			else
---				map.get(name)
---			endif
---		in
+
 		FUML!Behavior.allInstancesFrom('lib') -> any(e |
 			e.name.toLower() = name.toLower()
 		).type
@@ -171,7 +153,7 @@ helper context ATL!OperationCallExp def: inferredType : OclAny =
 		OclUndefined
 	else if self.sourceType.isCollection then
 		if Set {'including', 'excluding',
-					'union', 'intersection', 'insertAt'	-- TODO: commonSupertype
+					'union', 'intersection', 'insertAt'	
 				}->includes(name) then
 			self.sourceType
 		else if Set {'first', 'last', 'at'}->includes(name) then
