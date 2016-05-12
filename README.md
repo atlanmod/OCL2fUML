@@ -1,5 +1,5 @@
-# OCL2UML-v0.1
-**Configuration for testing the OCL2UML project :**
+# OCL2fUML
+**Configuration for testing the OCL2fUML project :**
 >**[ATL Configuration]**
 
 >1- input models:
